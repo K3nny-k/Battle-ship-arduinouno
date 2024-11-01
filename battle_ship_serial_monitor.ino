@@ -18,7 +18,6 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 // Grid state constants
 const int8_t EMPTY = 0;
-const int8_t SHIP_PRESENT = 1;
 const int8_t SHIP_HIT = -1;
 const uint8_t ATTACK_UNTRIED = 0;
 const uint8_t ATTACK_MISS = 1;
@@ -59,15 +58,19 @@ byte lastRedButtonState = HIGH;
 byte blueButtonState = HIGH;
 byte lastBlueButtonState = HIGH;
 
+// Blue button long press variables
+unsigned long blueButtonPressTime = 0;
+bool blueButtonLongPressHandled = false;
+bool blueButtonShortPress = false;
+
 // Joystick thresholds
 #define JOYSTICK_THRESHOLD 200
 #define JOYSTICK_CENTER 512
 unsigned long lastJoystickMoveTime = 0;
 #define JOYSTICK_MOVE_DELAY 200  // Delay between cursor movements in ms
 
-// Debounce variables
+// Debounce variables for red button
 unsigned long lastRedDebounceTime = 0;
-unsigned long lastBlueDebounceTime = 0;
 unsigned long debounceDelay = 50; // 50 milliseconds debounce delay
 
 // Game states
@@ -91,6 +94,8 @@ void placeShip(int8_t grid[GRID_SIZE][GRID_SIZE], uint8_t x, uint8_t y, uint8_t 
 void displayPlayerGrid();
 void displayAttackGrid();
 void resetGame();
+uint8_t countRemainingShips(int8_t grid[GRID_SIZE][GRID_SIZE]);
+void displayShipCounts(uint8_t playerShips, uint8_t arduinoShips);
 
 void setup() {
   // Initialize components
@@ -115,23 +120,62 @@ void setup() {
 }
 
 void loop() {
-  // Handle blue button for starting/resetting the game
+  // Read the blue button state
   blueButtonState = digitalRead(BLUE_BUTTON_PIN);
-  if (gameState == WAITING_TO_START || gameState == GAME_OVER) {
-    if (blueButtonState != lastBlueButtonState) {
-      if (blueButtonState == LOW) {
-        // Blue button pressed
-        resetGame();
-        playBuzzerTone(1000, 200);  // Confirmation tone
+
+  // Check for blue button state change
+  if (blueButtonState != lastBlueButtonState) {
+    if (blueButtonState == LOW) {
+      // Button pressed
+      blueButtonPressTime = millis();
+      blueButtonLongPressHandled = false;
+    } else {
+      // Button released
+      unsigned long pressDuration = millis() - blueButtonPressTime;
+      if (pressDuration >= 5000) {
+        // Long press handled in the loop
+      } else {
+        // Short press detected
+        blueButtonShortPress = true;
       }
-      delay(50); // Debounce delay
+      blueButtonPressTime = 0;
     }
     lastBlueButtonState = blueButtonState;
   }
 
+  // Handle long press
+  if (blueButtonState == LOW && !blueButtonLongPressHandled) {
+    unsigned long pressDuration = millis() - blueButtonPressTime;
+    if (pressDuration >= 5000) {
+      // Long press detected
+      resetGame();
+      playBuzzerTone(1000, 200);
+      blueButtonLongPressHandled = true;
+      blueButtonShortPress = false; // Prevent short press action
+    }
+  }
+
+  // Handle short press actions based on game state
+  if (blueButtonShortPress) {
+    blueButtonShortPress = false; // Reset flag after handling
+
+    if (gameState == WAITING_TO_START || gameState == GAME_OVER) {
+      // Start or reset the game
+      resetGame();
+      playBuzzerTone(1000, 200);
+    } else if (gameState == PLACING_SHIPS) {
+      // Toggle orientation
+      playerShipHorizontal = !playerShipHorizontal;
+      playBuzzerTone(800, 100);
+    } else {
+      // In other game states, short press does nothing
+    }
+  }
+
+  // Handle game states
   switch (gameState) {
     case WAITING_TO_START:
-      // Waiting for the player to press the blue button
+      // Waiting for blue button press, already handled
       break;
     case PLACING_SHIPS:
       playerPlaceShips();
@@ -143,14 +187,11 @@ void loop() {
       arduinoAttack();
       break;
     case GAME_OVER:
-      // Game over logic
-      lcd.setCursor(0, 1);
-      lcd.print(F("Press Blue Btn"));
-      // Waiting for reset
+      // Waiting for blue button press, already handled
       break;
   }
 
-  // Add a small delay to prevent flooding
+  // Small delay to prevent flooding
   delay(50);
 }
 
@@ -168,6 +209,12 @@ void resetGame() {
   // Reset button states
   lastRedButtonState = HIGH;
   lastBlueButtonState = HIGH;
+  blueButtonPressTime = 0;
+  blueButtonLongPressHandled = false;
+  blueButtonShortPress = false;
+
+  // Reset orientation
+  playerShipHorizontal = true;
 
   // Set game state
   gameState = PLACING_SHIPS;
@@ -234,11 +281,11 @@ boolean canPlaceShip(int8_t grid[GRID_SIZE][GRID_SIZE], uint8_t x, uint8_t y, ui
 void placeShip(int8_t grid[GRID_SIZE][GRID_SIZE], uint8_t x, uint8_t y, uint8_t size, boolean horizontal, uint8_t shipId) {
   if (horizontal) {
     for (uint8_t i = 0; i < size; i++) {
-      grid[x + i][y] = SHIP_PRESENT;
+      grid[x + i][y] = shipId; // Assign ship ID
     }
   } else {
     for (uint8_t i = 0; i < size; i++) {
-      grid[x][y + i] = SHIP_PRESENT;
+      grid[x][y + i] = shipId; // Assign ship ID
     }
   }
 }
@@ -302,27 +349,6 @@ void playerPlaceShips() {
   }
   lastRedButtonState = redReading;
 
-  // Handle blue button for toggling orientation
-  byte blueReading = digitalRead(BLUE_BUTTON_PIN);
-
-  if (blueReading != lastBlueButtonState) {
-    lastBlueDebounceTime = millis();
-  }
-
-  if ((millis() - lastBlueDebounceTime) > debounceDelay) {
-    if (blueReading != blueButtonState) {
-      blueButtonState = blueReading;
-
-      if (blueButtonState == LOW) {
-        // Blue button pressed, toggle orientation
-        playerShipHorizontal = !playerShipHorizontal;
-        playBuzzerTone(800, 100);  // Toggle tone
-        displayUpdated = true;
-      }
-    }
-  }
-  lastBlueButtonState = blueReading;
-
   // If cursor moved or display needs updating, update LCD and serial monitor
   if (cursorMoved || displayUpdated) {
     // Draw current ship position
@@ -372,11 +398,6 @@ boolean updateCursorPosition() {
   return moved;
 }
 
-// ... Rest of the code remains the same ...
-
-// Ensure to include all other functions as provided in the previous code.
-// The modifications are mainly in the `playerPlaceShips()` function and the addition of the orientation variable.
-
 void playerAttack() {
   boolean displayUpdated = false;
 
@@ -388,12 +409,11 @@ void playerAttack() {
 
   // Check if the button state has changed
   if (reading != lastRedButtonState) {
-    lastDebounceTime = millis();
+    lastRedDebounceTime = millis();
   }
 
   // Check if the debounce delay has passed
-  if ((millis() - lastDebounceTime) > debounceDelay) {
-    // If the button state has changed
+  if ((millis() - lastRedDebounceTime) > debounceDelay) {
     if (reading != redButtonState) {
       redButtonState = reading;
 
@@ -402,7 +422,7 @@ void playerAttack() {
         // Button pressed, attempt to attack
         if (playerAttackGrid[cursorX][cursorY] == ATTACK_UNTRIED) {
           // Proceed with attack
-          if (arduinoGrid[cursorX][cursorY] == SHIP_PRESENT) {
+          if (arduinoGrid[cursorX][cursorY] > 0) {
             // Hit
             playerAttackGrid[cursorX][cursorY] = ATTACK_HIT;
             arduinoGrid[cursorX][cursorY] = SHIP_HIT;  // Mark as hit
@@ -429,8 +449,21 @@ void playerAttack() {
             displayUpdated = true;
           }
 
+          // Count ships remaining
+          uint8_t playerShipsRemaining = countRemainingShips(playerGrid);
+          uint8_t arduinoShipsRemaining = countRemainingShips(arduinoGrid);
+
+          // Update Serial Monitor
+          Serial.print(F("Player Ships Remaining: "));
+          Serial.println(playerShipsRemaining);
+          Serial.print(F("Arduino Ships Remaining: "));
+          Serial.println(arduinoShipsRemaining);
+
+          // Update LCD
+          displayShipCounts(playerShipsRemaining, arduinoShipsRemaining);
+
           // Check if player has won
-          if (checkWin(arduinoGrid)) {
+          if (arduinoShipsRemaining == 0) {
             gameState = GAME_OVER;
             lcd.clear();
             lcd.print(F("You Win!"));
@@ -452,8 +485,6 @@ void playerAttack() {
       }
     }
   }
-
-  // Save the reading for the next loop iteration
   lastRedButtonState = reading;
 
   // If cursor moved or display needs updating, update LCD and serial monitor
@@ -514,7 +545,7 @@ void arduinoAttack() {
   Serial.print(y);
   Serial.println(F(")"));
 
-  if (playerGrid[x][y] == SHIP_PRESENT) {
+  if (playerGrid[x][y] > 0) {
     // Hit
     arduinoAttackGrid[x][y] = ATTACK_HIT;
     playerGrid[x][y] = SHIP_HIT;  // Mark as hit
@@ -541,11 +572,24 @@ void arduinoAttack() {
     Serial.println(F("Arduino missed."));
   }
 
+  // Count ships remaining
+  uint8_t playerShipsRemaining = countRemainingShips(playerGrid);
+  uint8_t arduinoShipsRemaining = countRemainingShips(arduinoGrid);
+
+  // Update Serial Monitor
+  Serial.print(F("Player Ships Remaining: "));
+  Serial.println(playerShipsRemaining);
+  Serial.print(F("Arduino Ships Remaining: "));
+  Serial.println(arduinoShipsRemaining);
+
+  // Update LCD
+  displayShipCounts(playerShipsRemaining, arduinoShipsRemaining);
+
   // Display updated player grid
   displayPlayerGrid();
 
   // Check if Arduino has won
-  if (checkWin(playerGrid)) {
+  if (playerShipsRemaining == 0) {
     gameState = GAME_OVER;
     lcd.clear();
     lcd.print(F("Arduino Wins!"));
@@ -559,15 +603,8 @@ void arduinoAttack() {
 }
 
 boolean checkWin(int8_t grid[GRID_SIZE][GRID_SIZE]) {
-  // Check if all ships are sunk (SHIP_HIT indicates hit ship part)
-  for (uint8_t i = 0; i < GRID_SIZE; i++) {
-    for (uint8_t j = 0; j < GRID_SIZE; j++) {
-      if (grid[i][j] == SHIP_PRESENT) {
-        return false;  // At least one ship part is still afloat
-      }
-    }
-  }
-  return true;  // All ships are sunk
+  // This function is no longer needed since we are using ship counts
+  return false;
 }
 
 void playBuzzerTone(int frequency, int duration) {
@@ -580,7 +617,7 @@ void displayPlayerGrid() {
     for (uint8_t x = 0; x < GRID_SIZE; x++) {
       if (playerGrid[x][y] == SHIP_HIT) {
         Serial.print(F(" X"));  // Hit ship part
-      } else if (playerGrid[x][y] == SHIP_PRESENT) {
+      } else if (playerGrid[x][y] > 0) {
         Serial.print(F(" S"));  // Ship part
       } else {
         if (arduinoAttackGrid[x][y] == ATTACK_MISS) {
@@ -610,4 +647,37 @@ void displayAttackGrid() {
     Serial.println();
   }
   Serial.println();
+}
+
+// Function to count the number of ships remaining on a grid
+uint8_t countRemainingShips(int8_t grid[GRID_SIZE][GRID_SIZE]) {
+  uint8_t shipsFound[NUM_SHIPS] = {0}; // Array to track ships found
+  uint8_t shipsRemaining = 0;
+
+  for (uint8_t x = 0; x < GRID_SIZE; x++) {
+    for (uint8_t y = 0; y < GRID_SIZE; y++) {
+      if (grid[x][y] > 0) {
+        // A ship part is still present
+        shipsFound[grid[x][y] - 1] = 1;
+      }
+    }
+  }
+
+  // Count the number of ships remaining
+  for (uint8_t i = 0; i < NUM_SHIPS; i++) {
+    if (shipsFound[i] == 1) {
+      shipsRemaining++;
+    }
+  }
+
+  return shipsRemaining;
+}
+
+void displayShipCounts(uint8_t playerShips, uint8_t arduinoShips) {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(F("You:"));
+  lcd.print(playerShips);
+  lcd.print(F(" CPU:"));
+  lcd.print(arduinoShips);
 }
