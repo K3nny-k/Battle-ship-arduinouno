@@ -90,6 +90,9 @@ uint8_t targetIndex;
 uint8_t targetList[4][2]; // Possible adjacent targets
 bool targetListInitialized = false;
 
+// Ship ID variable moved to global scope
+uint8_t shipId = 0; // Moved from static inside playerPlaceShips()
+
 // Function prototypes
 void initializeGrids();
 void placeArduinoShips();
@@ -226,8 +229,15 @@ void resetGame() {
   // Reset orientation
   playerShipHorizontal = true;
 
-  // Reset Arduino attack mode
+  // Reset shipId
+  shipId = 0;
+
+  // Reset Arduino attack mode variables
   arduinoAttackMode = HUNT_MODE;
+  lastHitX = 0;
+  lastHitY = 0;
+  targetIndex = 0;
+  targetListInitialized = false;
 
   // Set game state
   gameState = PLACING_SHIPS;
@@ -244,7 +254,7 @@ void resetGame() {
 }
 
 void initializeGrids() {
-  // Initialize all grids to zero
+  // Initialize all grids to their starting states
   for (uint8_t i = 0; i < GRID_SIZE; i++) {
     for (uint8_t j = 0; j < GRID_SIZE; j++) {
       playerGrid[i][j] = EMPTY;
@@ -340,7 +350,7 @@ void placeShip(int8_t grid[GRID_SIZE][GRID_SIZE], uint8_t x, uint8_t y, uint8_t 
 }
 
 void playerPlaceShips() {
-  static uint8_t shipId = 0;
+  // Use the global variable shipId
   boolean displayUpdated = false;
 
   // Check if all ships have been placed
