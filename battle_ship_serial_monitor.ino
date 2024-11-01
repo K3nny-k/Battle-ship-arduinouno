@@ -615,15 +615,34 @@ void displayPlayerGrid() {
   Serial.println(F("Your Grid:"));
   for (uint8_t y = 0; y < GRID_SIZE; y++) {
     for (uint8_t x = 0; x < GRID_SIZE; x++) {
-      if (playerGrid[x][y] == SHIP_HIT) {
-        Serial.print(F(" X"));  // Hit ship part
-      } else if (playerGrid[x][y] > 0) {
-        Serial.print(F(" S"));  // Ship part
-      } else {
-        if (arduinoAttackGrid[x][y] == ATTACK_MISS) {
-          Serial.print(F(" M"));  // Miss
+      // Check if this position is where the cursor is
+      if (x == cursorX && y == cursorY) {
+        Serial.print(F(" ["));
+        // Determine what to display inside the brackets
+        if (playerGrid[x][y] == SHIP_HIT) {
+          Serial.print(F("X"));  // Hit ship part
+        } else if (playerGrid[x][y] > 0) {
+          Serial.print(F("S"));  // Ship part
         } else {
-          Serial.print(F(" ."));  // Empty
+          if (arduinoAttackGrid[x][y] == ATTACK_MISS) {
+            Serial.print(F("M"));  // Miss
+          } else {
+            Serial.print(F("."));  // Empty
+          }
+        }
+        Serial.print(F("]"));
+      } else {
+        // Not the cursor position
+        if (playerGrid[x][y] == SHIP_HIT) {
+          Serial.print(F(" X"));  // Hit ship part
+        } else if (playerGrid[x][y] > 0) {
+          Serial.print(F(" S"));  // Ship part
+        } else {
+          if (arduinoAttackGrid[x][y] == ATTACK_MISS) {
+            Serial.print(F(" M"));  // Miss
+          } else {
+            Serial.print(F(" ."));  // Empty
+          }
         }
       }
     }
@@ -632,16 +651,32 @@ void displayPlayerGrid() {
   Serial.println();
 }
 
+
 void displayAttackGrid() {
   Serial.println(F("Attack Grid:"));
   for (uint8_t y = 0; y < GRID_SIZE; y++) {
     for (uint8_t x = 0; x < GRID_SIZE; x++) {
-      if (playerAttackGrid[x][y] == ATTACK_HIT) {
-        Serial.print(F(" H"));  // Hit
-      } else if (playerAttackGrid[x][y] == ATTACK_MISS) {
-        Serial.print(F(" M"));  // Miss
+      // Check if this position is where the cursor is
+      if (x == cursorX && y == cursorY) {
+        Serial.print(F(" ["));
+        // Determine what to display inside the brackets
+        if (playerAttackGrid[x][y] == ATTACK_HIT) {
+          Serial.print(F("H"));  // Hit
+        } else if (playerAttackGrid[x][y] == ATTACK_MISS) {
+          Serial.print(F("M"));  // Miss
+        } else {
+          Serial.print(F("."));  // Untried
+        }
+        Serial.print(F("]"));
       } else {
-        Serial.print(F(" ."));  // Untried
+        // Not the cursor position
+        if (playerAttackGrid[x][y] == ATTACK_HIT) {
+          Serial.print(F(" H"));  // Hit
+        } else if (playerAttackGrid[x][y] == ATTACK_MISS) {
+          Serial.print(F(" M"));  // Miss
+        } else {
+          Serial.print(F(" ."));  // Untried
+        }
       }
     }
     Serial.println();
