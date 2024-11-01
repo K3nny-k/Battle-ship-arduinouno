@@ -80,6 +80,16 @@ GameState gameState = WAITING_TO_START;
 // Orientation variable for player's ships
 boolean playerShipHorizontal = true; // true for horizontal, false for vertical
 
+// Arduino attack state variables
+enum AttackMode { HUNT_MODE, TARGET_MODE };
+AttackMode arduinoAttackMode = HUNT_MODE;
+
+uint8_t lastHitX;
+uint8_t lastHitY;
+uint8_t targetIndex;
+uint8_t targetList[4][2]; // Possible adjacent targets
+bool targetListInitialized = false;
+
 // Function prototypes
 void initializeGrids();
 void placeArduinoShips();
@@ -216,6 +226,9 @@ void resetGame() {
   // Reset orientation
   playerShipHorizontal = true;
 
+  // Reset Arduino attack mode
+  arduinoAttackMode = HUNT_MODE;
+
   // Set game state
   gameState = PLACING_SHIPS;
 
@@ -266,13 +279,49 @@ void placeArduinoShips() {
 boolean canPlaceShip(int8_t grid[GRID_SIZE][GRID_SIZE], uint8_t x, uint8_t y, uint8_t size, boolean horizontal) {
   if (horizontal) {
     if (x + size > GRID_SIZE) return false;
+
     for (uint8_t i = 0; i < size; i++) {
-      if (grid[x + i][y] != EMPTY) return false;
+      uint8_t xi = x + i;
+      uint8_t yi = y;
+
+      // Check if current position is empty
+      if (grid[xi][yi] != EMPTY) return false;
+
+      // Check surrounding cells
+      for (int8_t dx = -1; dx <= 1; dx++) {
+        for (int8_t dy = -1; dy <= 1; dy++) {
+          int8_t nx = xi + dx;
+          int8_t ny = yi + dy;
+          if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE) {
+            if (grid[nx][ny] != EMPTY && !(nx == xi && ny == yi)) {
+              return false;
+            }
+          }
+        }
+      }
     }
   } else {
     if (y + size > GRID_SIZE) return false;
+
     for (uint8_t i = 0; i < size; i++) {
-      if (grid[x][y + i] != EMPTY) return false;
+      uint8_t xi = x;
+      uint8_t yi = y + i;
+
+      // Check if current position is empty
+      if (grid[xi][yi] != EMPTY) return false;
+
+      // Check surrounding cells
+      for (int8_t dx = -1; dx <= 1; dx++) {
+        for (int8_t dy = -1; dy <= 1; dy++) {
+          int8_t nx = xi + dx;
+          int8_t ny = yi + dy;
+          if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE) {
+            if (grid[nx][ny] != EMPTY && !(nx == xi && ny == yi)) {
+              return false;
+            }
+          }
+        }
+      }
     }
   }
   return true;
@@ -505,71 +554,141 @@ void playerAttack() {
 }
 
 void arduinoAttack() {
-  // Simple random attack logic
   uint8_t x, y;
-  boolean validAttack = false;
+  bool validAttack = false;
 
-  // Check if there are any untried positions left
-  boolean positionsLeft = false;
-  for (uint8_t i = 0; i < GRID_SIZE; i++) {
-    for (uint8_t j = 0; j < GRID_SIZE; j++) {
-      if (arduinoAttackGrid[i][j] == ATTACK_UNTRIED) {
-        positionsLeft = true;
+  if (arduinoAttackMode == HUNT_MODE) {
+    // Hunt Mode: Random attack
+    do {
+      x = random(0, GRID_SIZE);
+      y = random(0, GRID_SIZE);
+      if (arduinoAttackGrid[x][y] == ATTACK_UNTRIED) {
+        validAttack = true;
+      }
+    } while (!validAttack);
+
+    Serial.print(F("Arduino attacks at ("));
+    Serial.print(x);
+    Serial.print(F(", "));
+    Serial.print(y);
+    Serial.println(F(")"));
+
+    if (playerGrid[x][y] > 0) {
+      // Hit
+      arduinoAttackGrid[x][y] = ATTACK_HIT;
+      playerGrid[x][y] = SHIP_HIT;
+      lastHitX = x;
+      lastHitY = y;
+      arduinoAttackMode = TARGET_MODE;
+      targetIndex = 0;
+      targetListInitialized = false;
+      lcd.clear();
+      lcd.print(F("Arduino Hit at"));
+      lcd.setCursor(0, 1);
+      lcd.print(F("X:"));
+      lcd.print(x);
+      lcd.print(F(" Y:"));
+      lcd.print(y);
+      playBuzzerTone(1500, 500);
+      Serial.println(F("Arduino scored a hit!"));
+    } else {
+      // Miss
+      arduinoAttackGrid[x][y] = ATTACK_MISS;
+      lcd.clear();
+      lcd.print(F("Arduino Miss at"));
+      lcd.setCursor(0, 1);
+      lcd.print(F("X:"));
+      lcd.print(x);
+      lcd.print(F(" Y:"));
+      lcd.print(y);
+      playBuzzerTone(500, 200);
+      Serial.println(F("Arduino missed."));
+    }
+  } else if (arduinoAttackMode == TARGET_MODE) {
+    // Target Mode: Attack adjacent cells
+    if (!targetListInitialized) {
+      // Initialize target list with adjacent cells
+      targetIndex = 0;
+      uint8_t idx = 0;
+
+      if (lastHitX > 0) {
+        targetList[idx][0] = lastHitX - 1;
+        targetList[idx][1] = lastHitY;
+        idx++;
+      }
+      if (lastHitX < GRID_SIZE - 1) {
+        targetList[idx][0] = lastHitX + 1;
+        targetList[idx][1] = lastHitY;
+        idx++;
+      }
+      if (lastHitY > 0) {
+        targetList[idx][0] = lastHitX;
+        targetList[idx][1] = lastHitY - 1;
+        idx++;
+      }
+      if (lastHitY < GRID_SIZE - 1) {
+        targetList[idx][0] = lastHitX;
+        targetList[idx][1] = lastHitY + 1;
+        idx++;
+      }
+
+      targetListInitialized = true;
+    }
+
+    while (targetIndex < 4) {
+      x = targetList[targetIndex][0];
+      y = targetList[targetIndex][1];
+      targetIndex++;
+
+      if (arduinoAttackGrid[x][y] == ATTACK_UNTRIED) {
+        validAttack = true;
         break;
       }
     }
-    if (positionsLeft) break;
-  }
 
-  if (!positionsLeft) {
-    // No positions left to attack
-    gameState = GAME_OVER;
-    lcd.clear();
-    lcd.print(F("Game Over"));
-    Serial.println(F("Game over: No positions left to attack."));
-    return;
-  }
+    if (validAttack) {
+      Serial.print(F("Arduino attacks at ("));
+      Serial.print(x);
+      Serial.print(F(", "));
+      Serial.print(y);
+      Serial.println(F(")"));
 
-  // Select a random untried position
-  do {
-    x = random(0, GRID_SIZE);
-    y = random(0, GRID_SIZE);
-    if (arduinoAttackGrid[x][y] == ATTACK_UNTRIED) {
-      validAttack = true;
+      if (playerGrid[x][y] > 0) {
+        // Hit
+        arduinoAttackGrid[x][y] = ATTACK_HIT;
+        playerGrid[x][y] = SHIP_HIT;
+        lastHitX = x;
+        lastHitY = y;
+        targetIndex = 0;
+        targetListInitialized = false;
+        lcd.clear();
+        lcd.print(F("Arduino Hit at"));
+        lcd.setCursor(0, 1);
+        lcd.print(F("X:"));
+        lcd.print(x);
+        lcd.print(F(" Y:"));
+        lcd.print(y);
+        playBuzzerTone(1500, 500);
+        Serial.println(F("Arduino scored a hit!"));
+      } else {
+        // Miss
+        arduinoAttackGrid[x][y] = ATTACK_MISS;
+        lcd.clear();
+        lcd.print(F("Arduino Miss at"));
+        lcd.setCursor(0, 1);
+        lcd.print(F("X:"));
+        lcd.print(x);
+        lcd.print(F(" Y:"));
+        lcd.print(y);
+        playBuzzerTone(500, 200);
+        Serial.println(F("Arduino missed."));
+      }
+    } else {
+      // No valid adjacent targets left, switch back to hunt mode
+      arduinoAttackMode = HUNT_MODE;
+      arduinoAttack(); // Retry attack in hunt mode
+      return;
     }
-  } while (!validAttack);
-
-  Serial.print(F("Arduino attacks at ("));
-  Serial.print(x);
-  Serial.print(F(", "));
-  Serial.print(y);
-  Serial.println(F(")"));
-
-  if (playerGrid[x][y] > 0) {
-    // Hit
-    arduinoAttackGrid[x][y] = ATTACK_HIT;
-    playerGrid[x][y] = SHIP_HIT;  // Mark as hit
-    lcd.clear();
-    lcd.print(F("Arduino Hit at"));
-    lcd.setCursor(0, 1);
-    lcd.print(F("X:"));
-    lcd.print(x);
-    lcd.print(F(" Y:"));
-    lcd.print(y);
-    playBuzzerTone(1500, 500);  // Hit tone
-    Serial.println(F("Arduino scored a hit!"));
-  } else {
-    // Miss
-    arduinoAttackGrid[x][y] = ATTACK_MISS;
-    lcd.clear();
-    lcd.print(F("Arduino Miss at"));
-    lcd.setCursor(0, 1);
-    lcd.print(F("X:"));
-    lcd.print(x);
-    lcd.print(F(" Y:"));
-    lcd.print(y);
-    playBuzzerTone(500, 200);  // Miss tone
-    Serial.println(F("Arduino missed."));
   }
 
   // Count ships remaining
@@ -600,11 +719,6 @@ void arduinoAttack() {
 
   // Switch back to player's turn
   gameState = PLAYER_TURN;
-}
-
-boolean checkWin(int8_t grid[GRID_SIZE][GRID_SIZE]) {
-  // This function is no longer needed since we are using ship counts
-  return false;
 }
 
 void playBuzzerTone(int frequency, int duration) {
@@ -651,7 +765,6 @@ void displayPlayerGrid() {
   Serial.println();
 }
 
-
 void displayAttackGrid() {
   Serial.println(F("Attack Grid:"));
   for (uint8_t y = 0; y < GRID_SIZE; y++) {
@@ -684,7 +797,6 @@ void displayAttackGrid() {
   Serial.println();
 }
 
-// Function to count the number of ships remaining on a grid
 uint8_t countRemainingShips(int8_t grid[GRID_SIZE][GRID_SIZE]) {
   uint8_t shipsFound[NUM_SHIPS] = {0}; // Array to track ships found
   uint8_t shipsRemaining = 0;
