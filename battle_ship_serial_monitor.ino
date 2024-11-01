@@ -3,10 +3,10 @@
 #include <stdint.h> // For int8_t data type
 
 // Define pins
-#define RED_BUTTON_PIN 2    // For placing ships and confirming attacks
-#define BLUE_BUTTON_PIN 3   // For starting/resetting the game and toggling orientation
-#define BUZZER_PIN 9
-#define JOYSTICK_X_PIN A0
+#define RED_BUTTON_PIN 12    // For placing ships and confirming attacks
+#define BLUE_BUTTON_PIN 13   // For starting/resetting the game and toggling orientation
+#define BUZZER_PIN 8
+#define JOYSTICK_X_PIN A3
 #define JOYSTICK_Y_PIN A1
 
 // LCD address and size (adjust the address if needed)
