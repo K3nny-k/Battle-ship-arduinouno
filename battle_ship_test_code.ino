@@ -484,45 +484,25 @@ bool updateCursorPosition() {
 
 void handleJoystickButton() {
   joystickButtonState = digitalRead(JOYSTICK_BUTTON_PIN);
-
-  unsigned long currentTime = millis();
-
   if (joystickButtonState != lastJoystickButtonState) {
     if (joystickButtonState == LOW) {
       // Button pressed
-      if (currentTime - lastJoystickButtonPressTime < joystickDoubleClickThreshold) {
-        // Detected a second press within the threshold
+      unsigned long currentTime = millis();
+      if (currentTime - lastJoystickButtonReleaseTime < joystickDoubleClickThreshold) {
         joystickButtonClickCount++;
-        Serial.print("Click count: ");
-        Serial.println(joystickButtonClickCount);
       } else {
-        // First click
         joystickButtonClickCount = 1;
-        Serial.println("First click detected");
       }
-      lastJoystickButtonPressTime = currentTime;
-    } else {
-      // Button released
-      // No action needed on release
+      lastJoystickButtonReleaseTime = currentTime;
+
+      if (joystickButtonClickCount == 2) {
+        // Double-click detected, toggle orientation
+        playerShipHorizontal = !playerShipHorizontal;
+        playBuzzerTone(800, 100);
+        joystickButtonClickCount = 0;
+      }
     }
     lastJoystickButtonState = joystickButtonState;
-  }
-
-  // Check for double-click
-  if (joystickButtonClickCount == 2 && (currentTime - lastJoystickButtonPressTime) < joystickDoubleClickThreshold) {
-    // Double-click detected, toggle orientation
-    playerShipHorizontal = !playerShipHorizontal;
-    playBuzzerTone(800, 100);
-    Serial.println("Orientation toggled via double-click");
-    joystickButtonClickCount = 0; // Reset click count
-  }
-
-  // Reset click count if too much time has passed
-  if ((currentTime - lastJoystickButtonPressTime) > joystickDoubleClickThreshold) {
-    if (joystickButtonClickCount != 0) {
-      Serial.println("Click count reset due to timeout");
-    }
-    joystickButtonClickCount = 0;
   }
 }
 
