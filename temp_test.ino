@@ -1,8 +1,10 @@
-// Battleship Game Arduino Code with Two 16x16 LED Matrices (Optimized for Arduino Mega)
+// Battleship Game Arduino Code with Single 16x16 LED Matrix Representing Two 8x8 Grids
 
 #include <FastLED.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
+
+// --------------------- Definitions ---------------------
 
 // Define pins
 #define BUZZER_PIN 8
@@ -14,18 +16,16 @@
 #define CPU_SIGNAL_PIN 7       // Signal pin to CPU Arduino
 
 // LED Matrix definitions
-#define NUM_LEDS_PER_MATRIX 256 // 16x16 LED matrix
-#define DATA_PIN_PLACEMENT 3
-#define DATA_PIN_ATTACK 5
+#define NUM_LEDS_TOTAL 256 // 16x16 LED matrix
+#define DATA_PIN 3
 
-CRGB ledsPlacement[NUM_LEDS_PER_MATRIX]; // LED Matrix for Player's Grid
-CRGB ledsAttack[NUM_LEDS_PER_MATRIX];    // LED Matrix for Attack Grid
+CRGB leds[NUM_LEDS_TOTAL]; // Single LED array for 16x16 matrix
 
 // Define the size of the game grid
-#define GRID_SIZE 10
+#define GRID_SIZE 8 // Each grid is 8x8
 
 // Game constants
-#define NUM_SHIPS 5  // Number of ships
+#define NUM_SHIPS 4  // Reduced number of ships
 
 // Cell state encoding (2 bits per cell)
 #define CELL_EMPTY 0b00
@@ -43,15 +43,14 @@ const Ship ships[NUM_SHIPS] PROGMEM = {
   {"Carrier", 5},
   {"Battleship", 4},
   {"Cruiser", 3},
-  {"Submarine", 3},
   {"Destroyer", 2}
 };
 
 // Grids represented as bitfields (arrays of bytes)
-uint8_t playerGrid[(GRID_SIZE * GRID_SIZE + 3) / 4 + 1];      // 26 bytes
-uint8_t arduinoGrid[(GRID_SIZE * GRID_SIZE + 3) / 4 + 1];     // 26 bytes
-uint8_t playerAttackGrid[(GRID_SIZE * GRID_SIZE + 3) / 4 + 1];   // 26 bytes
-uint8_t arduinoAttackGrid[(GRID_SIZE * GRID_SIZE + 3) / 4 + 1];  // 26 bytes
+uint8_t playerGrid[(GRID_SIZE * GRID_SIZE + 3) / 4 + 1];       // 17 bytes
+uint8_t arduinoGrid[(GRID_SIZE * GRID_SIZE + 3) / 4 + 1];      // 17 bytes
+uint8_t playerAttackGrid[(GRID_SIZE * GRID_SIZE + 3) / 4 + 1]; // 17 bytes
+uint8_t arduinoAttackGrid[(GRID_SIZE * GRID_SIZE + 3) / 4 + 1];// 17 bytes
 
 // Cursor position
 uint8_t cursorX = 0;
@@ -68,17 +67,17 @@ unsigned long blueButtonPressTime = 0;
 bool blueButtonLongPressHandled = false;
 bool blueButtonShortPress = false;
 unsigned long lastBlueDebounceTime = 0;
-unsigned long blueDebounceDelay = 50; // 50 ms debounce
+const unsigned long blueDebounceDelay = 50; // 50 ms debounce
 
 // Debounce variables for red button
 unsigned long lastRedDebounceTime = 0;
-unsigned long redDebounceDelay = 50; // 50 milliseconds debounce delay
+const unsigned long redDebounceDelay = 50; // 50 milliseconds debounce delay
 
 // Joystick thresholds
 #define JOYSTICK_THRESHOLD 200
 #define JOYSTICK_CENTER 512
 unsigned long lastJoystickMoveTime = 0;
-#define JOYSTICK_MOVE_DELAY 200  // Delay between moves in ms
+const unsigned long joystickMoveDelay = 200;  // Delay between moves in ms
 
 // Joystick button variables for orientation change
 byte joystickButtonState = HIGH;
@@ -87,9 +86,9 @@ unsigned long joystickButtonPressTime = 0;
 bool joystickButtonLongPressHandled = false;
 bool joystickButtonShortPress = false;
 unsigned long lastJoystickButtonTime = 0;
-unsigned long joystickButtonDebounceDelay = 50;
+const unsigned long joystickButtonDebounceDelay = 50;
 unsigned long lastJoystickButtonReleaseTime = 0;
-unsigned long joystickDoubleClickThreshold = 500; // 500 ms
+const unsigned long joystickDoubleClickThreshold = 500; // 500 ms
 int joystickButtonClickCount = 0;
 
 // Game states
@@ -113,7 +112,10 @@ bool targetListInitialized = false;
 // Ship ID variable
 uint8_t shipId = 0;
 
-// Function prototypes
+// LCD Initialization
+LiquidCrystal_I2C lcd(0x27, 16, 2); // Initialize LCD with I2C address 0x27
+
+// --------------------- Function Prototypes ---------------------
 void initializeGrids();
 void placeArduinoShips();
 void playerPlaceShips();
@@ -135,8 +137,7 @@ void handleJoystickButton();
 void updatePlacementLEDMatrix();
 void updateAttackLEDMatrix();
 
-LiquidCrystal_I2C lcd(0x27, 16, 2); // Initialize LCD with I2C address 0x27
-
+// --------------------- Setup Function ---------------------
 void setup() {
   // Initialize components
   pinMode(BUZZER_PIN, OUTPUT);
@@ -146,30 +147,45 @@ void setup() {
   pinMode(CPU_SIGNAL_PIN, OUTPUT);
   digitalWrite(CPU_SIGNAL_PIN, LOW); // Ensure it's LOW at start
 
-  // Initialize LEDs for Placement Grid
-  FastLED.addLeds<WS2812B, DATA_PIN_PLACEMENT, GRB>(ledsPlacement, NUM_LEDS_PER_MATRIX);
-  // Initialize LEDs for Attack Grid
-  FastLED.addLeds<WS2812B, DATA_PIN_ATTACK, GRB>(ledsAttack, NUM_LEDS_PER_MATRIX);
-  
-  FastLED.setBrightness(20); // Reduced brightness for both matrices
+  // Initialize LEDs for 16x16 Matrix
+  FastLED.addLeds<WS2812B, DATA_PIN, GRB>(leds, NUM_LEDS_TOTAL);
+  FastLED.setBrightness(20); // Adjust brightness as needed
   FastLED.clear();
   FastLED.show();
 
-  // Initial Refresh: Light up both matrices with distinct colors
-  fill_solid(ledsPlacement, NUM_LEDS_PER_MATRIX, CRGB::Green); // Placement Matrix Green
-  fill_solid(ledsAttack, NUM_LEDS_PER_MATRIX, CRGB::Blue);    // Attack Matrix Blue
+  // Initial Refresh: Light up both grids with distinct colors
+  // Placement Grid (Top-Left 8x8) - Green
+  for (uint8_t y = 0; y < GRID_SIZE; y++) {
+    for (uint8_t x = 0; x < GRID_SIZE; x++) {
+      int ledIndex = getLEDIndex(x, y, true);
+      if (ledIndex != -1) {
+        leds[ledIndex] = CRGB::Green;
+      }
+    }
+  }
+
+  // Attack Grid (Top-Right 8x8) - Blue
+  for (uint8_t y = 0; y < GRID_SIZE; y++) {
+    for (uint8_t x = 0; x < GRID_SIZE; x++) {
+      int ledIndex = getLEDIndex(x, y, false);
+      if (ledIndex != -1) {
+        leds[ledIndex] = CRGB::Blue;
+      }
+    }
+  }
+
   FastLED.show();
   delay(2000); // Hold the test pattern for 2 seconds
 
-  // Clear both matrices
-  fill_solid(ledsPlacement, NUM_LEDS_PER_MATRIX, CRGB::Black);
-  fill_solid(ledsAttack, NUM_LEDS_PER_MATRIX, CRGB::Black);
+  // Clear both grids
+  FastLED.clear();
   FastLED.show();
 
   // Initialize LCD
   lcd.init();
   lcd.backlight();
 
+  // Initialize Serial Communication
   Serial.begin(9600);
 
   // Display welcome message
@@ -183,6 +199,7 @@ void setup() {
   Serial.println(F("Press the blue button to start."));
 }
 
+// --------------------- Main Loop ---------------------
 void loop() {
   // Read the blue button state
   blueButtonState = digitalRead(BLUE_BUTTON_PIN);
@@ -261,69 +278,17 @@ void loop() {
   delay(50);
 }
 
-void resetGame() {
-  // Initialize grids
-  initializeGrids();
+// --------------------- Function Implementations ---------------------
 
-  // Place Arduino ships
-  placeArduinoShips();
-
-  // Reset cursor
-  cursorX = 0;
-  cursorY = 0;
-
-  // Reset button states
-  lastRedButtonState = HIGH;
-  lastBlueButtonState = HIGH;
-  blueButtonPressTime = 0;
-  blueButtonLongPressHandled = false;
-  blueButtonShortPress = false;
-
-  // Reset joystick button states
-  lastJoystickButtonState = HIGH;
-  joystickButtonPressTime = 0;
-  joystickButtonLongPressHandled = false;
-  joystickButtonShortPress = false;
-  joystickButtonClickCount = 0;
-
-  // Reset orientation
-  playerShipHorizontal = true;
-
-  // Reset shipId
-  shipId = 0;
-
-  // Reset Arduino attack mode variables
-  arduinoAttackMode = HUNT_MODE;
-  lastHitX = 0;
-  lastHitY = 0;
-  targetIndex = 0;
-  targetListInitialized = false;
-
-  // Set game state
-  gameState = PLACING_SHIPS;
-
-  // Display message
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print(F("Place your ships"));
-  lcd.setCursor(0, 1);
-  lcd.print(F("Use Btns & Joy"));
-
-  Serial.println(F("Game reset."));
-  Serial.println(F("Player, place your ships."));
-
-  // Update the LED matrices
-  updateLEDMatrix();
-}
-
+// Initialize all grids to empty
 void initializeGrids() {
-  // Initialize all grids to starting states
   memset(playerGrid, 0, sizeof(playerGrid));
   memset(arduinoGrid, 0, sizeof(arduinoGrid));
   memset(playerAttackGrid, 0, sizeof(playerAttackGrid));
   memset(arduinoAttackGrid, 0, sizeof(arduinoAttackGrid));
 }
 
+// Randomly place Arduino ships on its grid
 void placeArduinoShips() {
   // Seed random number generator
   randomSeed(analogRead(0));
@@ -347,37 +312,7 @@ void placeArduinoShips() {
   }
 }
 
-bool canPlaceShip(uint8_t* grid, uint8_t x, uint8_t y, uint8_t size, bool horizontal) {
-  if (horizontal) {
-    if (x + size > GRID_SIZE) return false;
-    for (uint8_t i = 0; i < size; i++) {
-      uint8_t xi = x + i;
-      uint8_t yi = y;
-      if (getCellState(grid, xi, yi) != CELL_EMPTY) return false;
-    }
-  } else {
-    if (y + size > GRID_SIZE) return false;
-    for (uint8_t i = 0; i < size; i++) {
-      uint8_t xi = x;
-      uint8_t yi = y + i;
-      if (getCellState(grid, xi, yi) != CELL_EMPTY) return false;
-    }
-  }
-  return true;
-}
-
-void placeShip(uint8_t* grid, uint8_t x, uint8_t y, uint8_t size, bool horizontal) {
-  if (horizontal) {
-    for (uint8_t i = 0; i < size; i++) {
-      setCellState(grid, x + i, y, CELL_SHIP);
-    }
-  } else {
-    for (uint8_t i = 0; i < size; i++) {
-      setCellState(grid, x, y + i, CELL_SHIP);
-    }
-  }
-}
-
+// Handle ship placement by the player
 void playerPlaceShips() {
   bool displayUpdated = false;
 
@@ -459,63 +394,7 @@ void playerPlaceShips() {
   }
 }
 
-bool updateCursorPosition() {
-  int xValue = analogRead(JOYSTICK_X_PIN);
-  int yValue = analogRead(JOYSTICK_Y_PIN);
-  unsigned long currentTime = millis();
-  bool moved = false;
-
-  if (currentTime - lastJoystickMoveTime > JOYSTICK_MOVE_DELAY) {
-    // Left and right movement
-    if (xValue < JOYSTICK_CENTER - JOYSTICK_THRESHOLD) {
-      cursorX = (cursorX > 0) ? cursorX - 1 : 0;
-      lastJoystickMoveTime = currentTime;
-      moved = true;
-    } else if (xValue > JOYSTICK_CENTER + JOYSTICK_THRESHOLD) {
-      cursorX = (cursorX < GRID_SIZE - 1) ? cursorX + 1 : GRID_SIZE - 1;
-      lastJoystickMoveTime = currentTime;
-      moved = true;
-    }
-
-    // Up and down movement (Y-axis reversed)
-    if (yValue > JOYSTICK_CENTER + JOYSTICK_THRESHOLD) {
-      cursorY = (cursorY > 0) ? cursorY - 1 : 0;
-      lastJoystickMoveTime = currentTime;
-      moved = true;
-    } else if (yValue < JOYSTICK_CENTER - JOYSTICK_THRESHOLD) {
-      cursorY = (cursorY < GRID_SIZE - 1) ? cursorY + 1 : GRID_SIZE - 1;
-      lastJoystickMoveTime = currentTime;
-      moved = true;
-    }
-  }
-
-  return moved;
-}
-
-void handleJoystickButton() {
-  joystickButtonState = digitalRead(JOYSTICK_BUTTON_PIN);
-  if (joystickButtonState != lastJoystickButtonState) {
-    if (joystickButtonState == LOW) {
-      // Button pressed
-      unsigned long currentTime = millis();
-      if (currentTime - lastJoystickButtonReleaseTime < joystickDoubleClickThreshold) {
-        joystickButtonClickCount++;
-      } else {
-        joystickButtonClickCount = 1;
-      }
-      lastJoystickButtonReleaseTime = currentTime;
-
-      if (joystickButtonClickCount == 2) {
-        // Double-click detected, toggle orientation
-        playerShipHorizontal = !playerShipHorizontal;
-        playBuzzerTone(800, 100);
-        joystickButtonClickCount = 0;
-      }
-    }
-    lastJoystickButtonState = joystickButtonState;
-  }
-}
-
+// Handle player's attack phase
 void playerAttack() {
   bool displayUpdated = false;
 
@@ -609,6 +488,7 @@ void playerAttack() {
   }
 }
 
+// Handle Arduino's attack phase
 void arduinoAttack() {
   uint8_t x, y;
   bool validAttack = false;
@@ -763,10 +643,12 @@ void arduinoAttack() {
   gameState = PLAYER_TURN;
 }
 
+// Play buzzer tone with given frequency and duration
 void playBuzzerTone(int frequency, int duration) {
   tone(BUZZER_PIN, frequency, duration);
 }
 
+// Count remaining ships on a grid
 uint8_t countRemainingShips(uint8_t* grid) {
   uint8_t shipsRemaining = 0;
   for (uint8_t x = 0; x < GRID_SIZE; x++) {
@@ -779,6 +661,7 @@ uint8_t countRemainingShips(uint8_t* grid) {
   return shipsRemaining;
 }
 
+// Display remaining ship counts on LCD
 void displayShipCounts(uint8_t playerShips, uint8_t arduinoShips) {
   lcd.clear();
   lcd.setCursor(0, 0);
@@ -788,12 +671,14 @@ void displayShipCounts(uint8_t playerShips, uint8_t arduinoShips) {
   lcd.print(arduinoShips);
 }
 
+// Update both Placement and Attack LED matrices
 void updateLEDMatrix() {
   updatePlacementLEDMatrix(); // Update Player's Grid LED Matrix
   updateAttackLEDMatrix();    // Update Attack Grid LED Matrix
-  FastLED.show();             // Update both matrices simultaneously
+  FastLED.show();             // Update the LED matrix
 }
 
+// Check if the current ship placement position is valid for preview
 bool isShipPreviewPosition(uint8_t x, uint8_t y) {
   // Only during ship placement
   if (gameState != PLACING_SHIPS) {
@@ -836,25 +721,29 @@ bool isShipPreviewPosition(uint8_t x, uint8_t y) {
   return false;
 }
 
+// Map 8x8 grid coordinates to 16x16 LED matrix indices
 int getLEDIndex(int x, int y, bool isPlacement) {
-  // Offset to center the 10x10 grid on the 16x16 matrix
-  int offsetX = 3;
-  int offsetY = 3;
+  // Define offsets for each grid within the 16x16 matrix
+  // Placement Grid: Top-Left (0,0)
+  // Attack Grid: Top-Right (8,0)
+  int offsetX = isPlacement ? 0 : 8;
+  int offsetY = 0; // Both grids start at y=0; adjust if needed
+
   int physicalX = x + offsetX;
   int physicalY = y + offsetY;
 
-  if (physicalX >= 16 || physicalY >= 16) return -1;
-
-  int ledIndex = physicalY * 16 + physicalX;
-
-  // Ensure ledIndex is within bounds
-  if (ledIndex < 0 || ledIndex >= NUM_LEDS_PER_MATRIX) {
+  // Ensure coordinates are within the 16x16 matrix
+  if (physicalX >= 16 || physicalY >= 16 || physicalX < 0 || physicalY < 0) {
     return -1; // Invalid index
   }
+
+  // Calculate LED index assuming row-major order
+  int ledIndex = physicalY * 16 + physicalX;
 
   return ledIndex;
 }
 
+// Set the state of a cell in the grid
 void setCellState(uint8_t* grid, uint8_t x, uint8_t y, uint8_t state) {
   uint16_t index = y * GRID_SIZE + x;
   uint16_t byteIndex = index / 4;
@@ -863,6 +752,7 @@ void setCellState(uint8_t* grid, uint8_t x, uint8_t y, uint8_t state) {
   grid[byteIndex] |= (state & 0b11) << bitOffset; // Set bits
 }
 
+// Get the state of a cell in the grid
 uint8_t getCellState(uint8_t* grid, uint8_t x, uint8_t y) {
   uint16_t index = y * GRID_SIZE + x;
   uint16_t byteIndex = index / 4;
@@ -870,13 +760,69 @@ uint8_t getCellState(uint8_t* grid, uint8_t x, uint8_t y) {
   return (grid[byteIndex] >> bitOffset) & 0b11;
 }
 
+// Reset the game to initial state
+void resetGame() {
+  // Initialize grids
+  initializeGrids();
+
+  // Place Arduino ships
+  placeArduinoShips();
+
+  // Reset cursor
+  cursorX = 0;
+  cursorY = 0;
+
+  // Reset button states
+  lastRedButtonState = HIGH;
+  lastBlueButtonState = HIGH;
+  blueButtonPressTime = 0;
+  blueButtonLongPressHandled = false;
+  blueButtonShortPress = false;
+
+  // Reset joystick button states
+  lastJoystickButtonState = HIGH;
+  joystickButtonPressTime = 0;
+  joystickButtonLongPressHandled = false;
+  joystickButtonShortPress = false;
+  joystickButtonClickCount = 0;
+
+  // Reset orientation
+  playerShipHorizontal = true;
+
+  // Reset shipId
+  shipId = 0;
+
+  // Reset Arduino attack mode variables
+  arduinoAttackMode = HUNT_MODE;
+  lastHitX = 0;
+  lastHitY = 0;
+  targetIndex = 0;
+  targetListInitialized = false;
+
+  // Set game state
+  gameState = PLACING_SHIPS;
+
+  // Display message
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(F("Place your ships"));
+  lcd.setCursor(0, 1);
+  lcd.print(F("Use Btns & Joy"));
+
+  Serial.println(F("Game reset."));
+  Serial.println(F("Player, place your ships."));
+
+  // Update the LED matrices
+  updateLEDMatrix();
+}
+
+// Update Placement LED Matrix (Top-Left 8x8)
 void updatePlacementLEDMatrix() {
-  // Loop through the player grid
   for (uint8_t y = 0; y < GRID_SIZE; y++) {
     for (uint8_t x = 0; x < GRID_SIZE; x++) {
       int ledIndex = getLEDIndex(x, y, true);
 
-      if (ledIndex >= 0 && ledIndex < NUM_LEDS_PER_MATRIX) {
+      if (ledIndex != -1) {
         // Determine the color for this cell
         CRGB color = CRGB::Black; // Default color
 
@@ -908,19 +854,19 @@ void updatePlacementLEDMatrix() {
           color = CRGB::Blue; // Missed attack by Arduino
         }
 
-        ledsPlacement[ledIndex] = color;
+        leds[ledIndex] = color;
       }
     }
   }
 }
 
+// Update Attack LED Matrix (Top-Right 8x8)
 void updateAttackLEDMatrix() {
-  // Loop through the player's attack grid
   for (uint8_t y = 0; y < GRID_SIZE; y++) {
     for (uint8_t x = 0; x < GRID_SIZE; x++) {
       int ledIndex = getLEDIndex(x, y, false);
 
-      if (ledIndex >= 0 && ledIndex < NUM_LEDS_PER_MATRIX) {
+      if (ledIndex != -1) {
         // Determine the color for this cell
         CRGB color = CRGB::Black; // Default color
 
@@ -938,8 +884,260 @@ void updateAttackLEDMatrix() {
           color = CRGB::Blue; // Miss
         }
 
-        ledsAttack[ledIndex] = color;
+        leds[ledIndex] = color;
       }
     }
   }
 }
+
+// Update both Placement and Attack LED matrices
+void updateLEDMatrix() {
+  updatePlacementLEDMatrix(); // Update Player's Grid LED Matrix
+  updateAttackLEDMatrix();    // Update Attack Grid LED Matrix
+  FastLED.show();             // Update the LED matrix
+}
+
+// Check if the current ship placement position is valid for preview
+bool isShipPreviewPosition(uint8_t x, uint8_t y) {
+  // Only during ship placement
+  if (gameState != PLACING_SHIPS) {
+    return false;
+  }
+
+  // Retrieve current ship data from PROGMEM
+  Ship currentShip;
+  memcpy_P(&currentShip, &ships[shipId], sizeof(Ship));
+
+  // Calculate the positions the ship would occupy
+  uint8_t shipSize = currentShip.size;
+
+  if (playerShipHorizontal) {
+    if (x + shipSize > GRID_SIZE) {
+      // Ship would go out of bounds
+      return false;
+    }
+    for (uint8_t i = 0; i < shipSize; i++) {
+      uint8_t xi = x + i;
+      uint8_t yi = y;
+      if (xi == cursorX && yi == cursorY) {
+        return true;
+      }
+    }
+  } else {
+    if (y + shipSize > GRID_SIZE) {
+      // Ship would go out of bounds
+      return false;
+    }
+    for (uint8_t i = 0; i < shipSize; i++) {
+      uint8_t xi = x;
+      uint8_t yi = y + i;
+      if (xi == cursorX && yi == cursorY) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+// Map 8x8 grid coordinates to 16x16 LED matrix indices
+int getLEDIndex(int x, int y, bool isPlacement) {
+  // Define offsets for each grid within the 16x16 matrix
+  // Placement Grid: Top-Left (0,0)
+  // Attack Grid: Top-Right (8,0)
+  int offsetX = isPlacement ? 0 : 8;
+  int offsetY = 0; // Both grids start at y=0; adjust if needed
+
+  int physicalX = x + offsetX;
+  int physicalY = y + offsetY;
+
+  // Ensure coordinates are within the 16x16 matrix
+  if (physicalX >= 16 || physicalY >= 16 || physicalX < 0 || physicalY < 0) {
+    return -1; // Invalid index
+  }
+
+  // Calculate LED index assuming row-major order
+  int ledIndex = physicalY * 16 + physicalX;
+
+  return ledIndex;
+}
+
+// Set the state of a cell in the grid
+void setCellState(uint8_t* grid, uint8_t x, uint8_t y, uint8_t state) {
+  uint16_t index = y * GRID_SIZE + x;
+  uint16_t byteIndex = index / 4;
+  uint8_t bitOffset = (index % 4) * 2;
+  grid[byteIndex] &= ~(0b11 << bitOffset); // Clear bits
+  grid[byteIndex] |= (state & 0b11) << bitOffset; // Set bits
+}
+
+// Get the state of a cell in the grid
+uint8_t getCellState(uint8_t* grid, uint8_t x, uint8_t y) {
+  uint16_t index = y * GRID_SIZE + x;
+  uint16_t byteIndex = index / 4;
+  uint8_t bitOffset = (index % 4) * 2;
+  return (grid[byteIndex] >> bitOffset) & 0b11;
+}
+
+// Reset the game to initial state
+void resetGame() {
+  // Initialize grids
+  initializeGrids();
+
+  // Place Arduino ships
+  placeArduinoShips();
+
+  // Reset cursor
+  cursorX = 0;
+  cursorY = 0;
+
+  // Reset button states
+  lastRedButtonState = HIGH;
+  lastBlueButtonState = HIGH;
+  blueButtonPressTime = 0;
+  blueButtonLongPressHandled = false;
+  blueButtonShortPress = false;
+
+  // Reset joystick button states
+  lastJoystickButtonState = HIGH;
+  joystickButtonPressTime = 0;
+  joystickButtonLongPressHandled = false;
+  joystickButtonShortPress = false;
+  joystickButtonClickCount = 0;
+
+  // Reset orientation
+  playerShipHorizontal = true;
+
+  // Reset shipId
+  shipId = 0;
+
+  // Reset Arduino attack mode variables
+  arduinoAttackMode = HUNT_MODE;
+  lastHitX = 0;
+  lastHitY = 0;
+  targetIndex = 0;
+  targetListInitialized = false;
+
+  // Set game state
+  gameState = PLACING_SHIPS;
+
+  // Display message
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(F("Place your ships"));
+  lcd.setCursor(0, 1);
+  lcd.print(F("Use Btns & Joy"));
+
+  Serial.println(F("Game reset."));
+  Serial.println(F("Player, place your ships."));
+
+  // Update the LED matrices
+  updateLEDMatrix();
+}
+
+// Update Placement LED Matrix (Top-Left 8x8)
+void updatePlacementLEDMatrix() {
+  for (uint8_t y = 0; y < GRID_SIZE; y++) {
+    for (uint8_t x = 0; x < GRID_SIZE; x++) {
+      int ledIndex = getLEDIndex(x, y, true);
+
+      if (ledIndex != -1) {
+        // Determine the color for this cell
+        CRGB color = CRGB::Black; // Default color
+
+        // Cursor position
+        if (x == cursorX && y == cursorY && gameState == PLACING_SHIPS) {
+          color = CRGB::White;
+        }
+
+        // Cell state
+        uint8_t cellState = getCellState(playerGrid, x, y);
+
+        if (cellState == CELL_SHIP) {
+          color = CRGB::Green; // Ship part
+        } else if (cellState == CELL_HIT) {
+          color = CRGB::Red; // Hit ship part
+        }
+
+        // Ship preview during placement
+        if (gameState == PLACING_SHIPS &&
+            isShipPreviewPosition(x, y)) {
+          color = CRGB::Yellow;  // Ship preview
+        }
+
+        // Hits by Arduino
+        uint8_t arduinoAttackState = getCellState(arduinoAttackGrid, x, y);
+        if (arduinoAttackState == CELL_HIT) {
+          color = CRGB::Red; // Hit by Arduino
+        } else if (arduinoAttackState == CELL_MISS) {
+          color = CRGB::Blue; // Missed attack by Arduino
+        }
+
+        leds[ledIndex] = color;
+      }
+    }
+  }
+}
+
+// Update Attack LED Matrix (Top-Right 8x8)
+void updateAttackLEDMatrix() {
+  for (uint8_t y = 0; y < GRID_SIZE; y++) {
+    for (uint8_t x = 0; x < GRID_SIZE; x++) {
+      int ledIndex = getLEDIndex(x, y, false);
+
+      if (ledIndex != -1) {
+        // Determine the color for this cell
+        CRGB color = CRGB::Black; // Default color
+
+        // Cursor position
+        if (x == cursorX && y == cursorY && gameState == PLAYER_TURN) {
+          color = CRGB::White;
+        }
+
+        // Attack grid state
+        uint8_t attackState = getCellState(playerAttackGrid, x, y);
+
+        if (attackState == CELL_HIT) {
+          color = CRGB::Red; // Hit
+        } else if (attackState == CELL_MISS) {
+          color = CRGB::Blue; // Miss
+        }
+
+        leds[ledIndex] = color;
+      }
+    }
+  }
+}
+
+// Handle joystick button for orientation change (single click)
+void handleJoystickButton() {
+  joystickButtonState = digitalRead(JOYSTICK_BUTTON_PIN);
+  if (joystickButtonState != lastJoystickButtonState) {
+    if (joystickButtonState == LOW) {
+      // Button pressed
+      unsigned long currentTime = millis();
+      if (currentTime - lastJoystickButtonReleaseTime < joystickDoubleClickThreshold) {
+        joystickButtonClickCount++;
+      } else {
+        joystickButtonClickCount = 1;
+      }
+      lastJoystickButtonReleaseTime = currentTime;
+
+      if (joystickButtonClickCount == 2) {
+        // Double-click detected, toggle orientation
+        playerShipHorizontal = !playerShipHorizontal;
+        playBuzzerTone(800, 100);
+        joystickButtonClickCount = 0;
+      }
+    }
+    lastJoystickButtonState = joystickButtonState;
+  }
+}
+
+// Update both Placement and Attack LED matrices
+void updateLEDMatrix() {
+  updatePlacementLEDMatrix(); // Update Player's Grid LED Matrix
+  updateAttackLEDMatrix();    // Update Attack Grid LED Matrix
+  FastLED.show();             // Update the LED matrix
+}
+
