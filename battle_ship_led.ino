@@ -19,11 +19,11 @@
 CRGB leds[NUM_LEDS];
 
 // Define the size of the game grid
-#define GRID_SIZE 12
+#define GRID_SIZE 10
 
-// Define offsets if the game grid doesn't start at (0,0)
-#define GRID_OFFSET_X 2  // Adjust as needed
-#define GRID_OFFSET_Y 2  // Adjust as needed
+// Define offsets to center the 10x10 grid on a 16x16 LED matrix
+#define GRID_OFFSET_X 3
+#define GRID_OFFSET_Y 3
 
 // Game constants
 #define NUM_SHIPS 5  // Number of ships
@@ -49,10 +49,11 @@ const Ship ships[NUM_SHIPS] PROGMEM = {
 };
 
 // Grids represented as bitfields (arrays of bytes)
-uint8_t playerGrid[(GRID_SIZE * GRID_SIZE + 3) / 4];   // 36 bytes
-uint8_t arduinoGrid[(GRID_SIZE * GRID_SIZE + 3) / 4];  // 36 bytes
-uint8_t playerAttackGrid[(GRID_SIZE * GRID_SIZE + 3) / 4];   // 36 bytes
-uint8_t arduinoAttackGrid[(GRID_SIZE * GRID_SIZE + 3) / 4];  // 36 bytes
+// For a 10x10 grid, we need (10 * 10 + 3) / 4 + 1 bytes to store the grid
+uint8_t playerGrid[(GRID_SIZE * GRID_SIZE + 3) / 4 + 1];   // 26 bytes
+uint8_t arduinoGrid[(GRID_SIZE * GRID_SIZE + 3) / 4 + 1];  // 26 bytes
+uint8_t playerAttackGrid[(GRID_SIZE * GRID_SIZE + 3) / 4 + 1];   // 26 bytes
+uint8_t arduinoAttackGrid[(GRID_SIZE * GRID_SIZE + 3) / 4 + 1];  // 26 bytes
 
 // Cursor position
 uint8_t cursorX = 0;
