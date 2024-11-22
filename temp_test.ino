@@ -15,8 +15,8 @@
 
 // LED Matrix definitions
 #define NUM_LEDS 100 // 10x10 LED matrix
-#define DATA_PIN 3
-#define DATA_PIN2 5
+#define DATA_PIN_PLACEMENT 3
+#define DATA_PIN_ATTACK 5
 
 CRGB ledsPlacement[NUM_LEDS]; // LED Matrix for Player's Grid
 CRGB ledsAttack[NUM_LEDS];    // LED Matrix for Attack Grid
@@ -48,8 +48,8 @@ const Ship ships[NUM_SHIPS] PROGMEM = {
 };
 
 // Grids represented as bitfields (arrays of bytes)
-uint8_t playerGrid[(GRID_SIZE * GRID_SIZE + 3) / 4 + 1];   // 26 bytes
-uint8_t arduinoGrid[(GRID_SIZE * GRID_SIZE + 3) / 4 + 1];  // 26 bytes
+uint8_t playerGrid[(GRID_SIZE * GRID_SIZE + 3) / 4 + 1];      // 26 bytes
+uint8_t arduinoGrid[(GRID_SIZE * GRID_SIZE + 3) / 4 + 1];     // 26 bytes
 uint8_t playerAttackGrid[(GRID_SIZE * GRID_SIZE + 3) / 4 + 1];   // 26 bytes
 uint8_t arduinoAttackGrid[(GRID_SIZE * GRID_SIZE + 3) / 4 + 1];  // 26 bytes
 
@@ -135,7 +135,8 @@ void handleJoystickButton();
 void updatePlacementLEDMatrix();
 void updateAttackLEDMatrix();
 
-LiquidCrystal_I2C lcd(0x27, 16, 2); // Initialize LCD
+// Initialize LCD
+LiquidCrystal_I2C lcd(0x27, 16, 2); // Initialize LCD with I2C address 0x27
 
 void setup() {
   // Initialize components
@@ -147,12 +148,23 @@ void setup() {
   digitalWrite(CPU_SIGNAL_PIN, LOW); // Ensure it's LOW at start
 
   // Initialize LEDs for Placement Grid
-  FastLED.addLeds<WS2812B, DATA_PIN, GRB>(ledsPlacement, NUM_LEDS);
+  FastLED.addLeds<WS2812B, DATA_PIN_PLACEMENT, GRB>(ledsPlacement, NUM_LEDS);
   // Initialize LEDs for Attack Grid
-  FastLED.addLeds<WS2812B, DATA_PIN2, GRB>(ledsAttack, NUM_LEDS);
+  FastLED.addLeds<WS2812B, DATA_PIN_ATTACK, GRB>(ledsAttack, NUM_LEDS);
   
   FastLED.setBrightness(20); // Reduced brightness for both matrices
   FastLED.clear();
+  FastLED.show();
+
+  // Initial Refresh: Light up both matrices with distinct colors
+  fill_solid(ledsPlacement, NUM_LEDS, CRGB::Green); // Placement Matrix Green
+  fill_solid(ledsAttack, NUM_LEDS, CRGB::Blue);    // Attack Matrix Blue
+  FastLED.show();
+  delay(2000); // Hold the test pattern for 2 seconds
+
+  // Clear both matrices
+  fill_solid(ledsPlacement, NUM_LEDS, CRGB::Black);
+  fill_solid(ledsAttack, NUM_LEDS, CRGB::Black);
   FastLED.show();
 
   // Initialize LCD
@@ -827,8 +839,7 @@ bool isShipPreviewPosition(uint8_t x, uint8_t y) {
 
 int getLEDIndex(int x, int y, bool isPlacement) {
   // Adjust x and y to the physical location in the 10x10 matrix
-  // Assuming each matrix starts at (0,0) and is 10x10
-  // You can modify this if the matrices are positioned differently
+  // Assuming each matrix is a separate 10x10 grid
   int ledIndex = y * GRID_SIZE + x;
 
   // Ensure ledIndex is within bounds
