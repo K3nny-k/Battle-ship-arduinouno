@@ -1,4 +1,4 @@
-// Battleship Game Arduino Code with Two 10x10 LED Matrices
+// Battleship Game Arduino Code with Two 16x16 LED Matrices (Optimized for Arduino Mega)
 
 #include <FastLED.h>
 #include <Wire.h>
@@ -14,12 +14,12 @@
 #define CPU_SIGNAL_PIN 7       // Signal pin to CPU Arduino
 
 // LED Matrix definitions
-#define NUM_LEDS 100 // 10x10 LED matrix
+#define NUM_LEDS_PER_MATRIX 256 // 16x16 LED matrix
 #define DATA_PIN_PLACEMENT 3
 #define DATA_PIN_ATTACK 5
 
-CRGB ledsPlacement[NUM_LEDS]; // LED Matrix for Player's Grid
-CRGB ledsAttack[NUM_LEDS];    // LED Matrix for Attack Grid
+CRGB ledsPlacement[NUM_LEDS_PER_MATRIX]; // LED Matrix for Player's Grid
+CRGB ledsAttack[NUM_LEDS_PER_MATRIX];    // LED Matrix for Attack Grid
 
 // Define the size of the game grid
 #define GRID_SIZE 10
@@ -135,7 +135,6 @@ void handleJoystickButton();
 void updatePlacementLEDMatrix();
 void updateAttackLEDMatrix();
 
-// Initialize LCD
 LiquidCrystal_I2C lcd(0x27, 16, 2); // Initialize LCD with I2C address 0x27
 
 void setup() {
@@ -148,23 +147,23 @@ void setup() {
   digitalWrite(CPU_SIGNAL_PIN, LOW); // Ensure it's LOW at start
 
   // Initialize LEDs for Placement Grid
-  FastLED.addLeds<WS2812B, DATA_PIN_PLACEMENT, GRB>(ledsPlacement, NUM_LEDS);
+  FastLED.addLeds<WS2812B, DATA_PIN_PLACEMENT, GRB>(ledsPlacement, NUM_LEDS_PER_MATRIX);
   // Initialize LEDs for Attack Grid
-  FastLED.addLeds<WS2812B, DATA_PIN_ATTACK, GRB>(ledsAttack, NUM_LEDS);
+  FastLED.addLeds<WS2812B, DATA_PIN_ATTACK, GRB>(ledsAttack, NUM_LEDS_PER_MATRIX);
   
   FastLED.setBrightness(20); // Reduced brightness for both matrices
   FastLED.clear();
   FastLED.show();
 
   // Initial Refresh: Light up both matrices with distinct colors
-  fill_solid(ledsPlacement, NUM_LEDS, CRGB::Green); // Placement Matrix Green
-  fill_solid(ledsAttack, NUM_LEDS, CRGB::Blue);    // Attack Matrix Blue
+  fill_solid(ledsPlacement, NUM_LEDS_PER_MATRIX, CRGB::Green); // Placement Matrix Green
+  fill_solid(ledsAttack, NUM_LEDS_PER_MATRIX, CRGB::Blue);    // Attack Matrix Blue
   FastLED.show();
   delay(2000); // Hold the test pattern for 2 seconds
 
   // Clear both matrices
-  fill_solid(ledsPlacement, NUM_LEDS, CRGB::Black);
-  fill_solid(ledsAttack, NUM_LEDS, CRGB::Black);
+  fill_solid(ledsPlacement, NUM_LEDS_PER_MATRIX, CRGB::Black);
+  fill_solid(ledsAttack, NUM_LEDS_PER_MATRIX, CRGB::Black);
   FastLED.show();
 
   // Initialize LCD
@@ -809,25 +808,25 @@ bool isShipPreviewPosition(uint8_t x, uint8_t y) {
   uint8_t shipSize = currentShip.size;
 
   if (playerShipHorizontal) {
-    if (cursorX + shipSize > GRID_SIZE) {
+    if (x + shipSize > GRID_SIZE) {
       // Ship would go out of bounds
       return false;
     }
     for (uint8_t i = 0; i < shipSize; i++) {
-      uint8_t xi = cursorX + i;
-      uint8_t yi = cursorY;
+      uint8_t xi = x + i;
+      uint8_t yi = y;
       if (x == xi && y == yi) {
         return true;
       }
     }
   } else {
-    if (cursorY + shipSize > GRID_SIZE) {
+    if (y + shipSize > GRID_SIZE) {
       // Ship would go out of bounds
       return false;
     }
     for (uint8_t i = 0; i < shipSize; i++) {
-      uint8_t xi = cursorX;
-      uint8_t yi = cursorY + i;
+      uint8_t xi = x;
+      uint8_t yi = y + i;
       if (x == xi && y == yi) {
         return true;
       }
@@ -838,12 +837,18 @@ bool isShipPreviewPosition(uint8_t x, uint8_t y) {
 }
 
 int getLEDIndex(int x, int y, bool isPlacement) {
-  // Adjust x and y to the physical location in the 10x10 matrix
-  // Assuming each matrix is a separate 10x10 grid
-  int ledIndex = y * GRID_SIZE + x;
+  // Offset to center the 10x10 grid on the 16x16 matrix
+  int offsetX = 3;
+  int offsetY = 3;
+  int physicalX = x + offsetX;
+  int physicalY = y + offsetY;
+
+  if (physicalX >= 16 || physicalY >= 16) return -1;
+
+  int ledIndex = physicalY * 16 + physicalX;
 
   // Ensure ledIndex is within bounds
-  if (ledIndex < 0 || ledIndex >= NUM_LEDS) {
+  if (ledIndex < 0 || ledIndex >= NUM_LEDS_PER_MATRIX) {
     return -1; // Invalid index
   }
 
@@ -871,7 +876,7 @@ void updatePlacementLEDMatrix() {
     for (uint8_t x = 0; x < GRID_SIZE; x++) {
       int ledIndex = getLEDIndex(x, y, true);
 
-      if (ledIndex >= 0 && ledIndex < NUM_LEDS) {
+      if (ledIndex >= 0 && ledIndex < NUM_LEDS_PER_MATRIX) {
         // Determine the color for this cell
         CRGB color = CRGB::Black; // Default color
 
@@ -915,7 +920,7 @@ void updateAttackLEDMatrix() {
     for (uint8_t x = 0; x < GRID_SIZE; x++) {
       int ledIndex = getLEDIndex(x, y, false);
 
-      if (ledIndex >= 0 && ledIndex < NUM_LEDS) {
+      if (ledIndex >= 0 && ledIndex < NUM_LEDS_PER_MATRIX) {
         // Determine the color for this cell
         CRGB color = CRGB::Black; // Default color
 
