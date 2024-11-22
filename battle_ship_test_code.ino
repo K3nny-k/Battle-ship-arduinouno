@@ -21,10 +21,6 @@
 CRGB ledsPlayer[NUM_LEDS];
 CRGB ledsCPU[NUM_LEDS];
 
-// LED Controllers
-CLEDController* playerController;
-CLEDController* cpuController;
-
 // Define the size of the game grid
 #define GRID_SIZE 10
 
@@ -149,9 +145,9 @@ void setup() {
   digitalWrite(CPU_SIGNAL_PIN, LOW); // Ensure it's LOW at start
 
   // Initialize LEDs for Player and CPU
-  playerController = &FastLED.addLeds<WS2812B, DATA_PIN_PLAYER, GRB>(ledsPlayer, NUM_LEDS);
-  cpuController = &FastLED.addLeds<WS2812B, DATA_PIN_CPU, GRB>(ledsCPU, NUM_LEDS);
-  FastLED.setBrightness(20); // Reduced brightness
+  FastLED.addLeds<WS2812B, DATA_PIN_PLAYER, GRB>(ledsPlayer, NUM_LEDS); // Controller 0
+  FastLED.addLeds<WS2812B, DATA_PIN_CPU, GRB>(ledsCPU, NUM_LEDS);       // Controller 1
+  FastLED.setBrightness(20); // Set global brightness
   FastLED.clear(true);
   FastLED.show();
 
@@ -837,8 +833,8 @@ void updatePlayerMatrix() {
     }
   }
 
-  // Show the player's LEDs
-  playerController->showLeds();
+  // Show the LEDs
+  FastLED.show();
 }
 
 void updateCPUMatrix() {
@@ -876,8 +872,8 @@ void updateCPUMatrix() {
     }
   }
 
-  // Show the CPU's LEDs
-  cpuController->showLeds();
+  // Show the LEDs
+  FastLED.show();
 }
 
 bool isShipPreviewPosition(uint8_t x, uint8_t y) {
