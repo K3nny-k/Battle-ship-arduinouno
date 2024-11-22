@@ -1,4 +1,4 @@
-// Game Arduino Code: Battleship Game with Signal to CPU Arduino
+// Game Arduino Code: Battleship Game with Separate LED Matrices for Player and CPU
 
 #include <FastLED.h>
 #include <Wire.h>
@@ -14,11 +14,12 @@
 #define CPU_SIGNAL_PIN 7       // Signal pin to CPU Arduino
 
 // LED Matrix definitions
-#define NUM_LEDS 256 // 16x16 LED matrix
-#define DATA_PIN 3
-#define DATA_PIN2 5
+#define NUM_LEDS 256 // 16x16 LED matrix for each
+#define DATA_PIN_PLAYER 3
+#define DATA_PIN_CPU 5
 
-CRGB leds[NUM_LEDS];
+CRGB ledsPlayer[NUM_LEDS];
+CRGB ledsCPU[NUM_LEDS];
 
 // Define the size of the game grid
 #define GRID_SIZE 10
@@ -129,7 +130,8 @@ void placeShip(uint8_t* grid, uint8_t x, uint8_t y, uint8_t size, bool horizonta
 void resetGame();
 uint8_t countRemainingShips(uint8_t* grid);
 void displayShipCounts(uint8_t playerShips, uint8_t arduinoShips);
-void updateLEDMatrix();
+void updatePlayerMatrix();
+void updateCPUMatrix();
 bool isShipPreviewPosition(uint8_t x, uint8_t y);
 int getLEDIndex(int x, int y);
 void setCellState(uint8_t* grid, uint8_t x, uint8_t y, uint8_t state);
@@ -147,11 +149,11 @@ void setup() {
   pinMode(CPU_SIGNAL_PIN, OUTPUT);
   digitalWrite(CPU_SIGNAL_PIN, LOW); // Ensure it's LOW at start
 
-  // Initialize LEDs
-  delay(2000);
-  FastLED.addLeds<WS2812B, DATA_PIN, GRB>(leds, NUM_LEDS);
+  // Initialize LEDs for Player and CPU
+  FastLED.addLeds<WS2812B, DATA_PIN_PLAYER, GRB>(ledsPlayer, NUM_LEDS);
+  FastLED.addLeds<WS2812B, DATA_PIN_CPU, GRB>(ledsCPU, NUM_LEDS);
   FastLED.setBrightness(20); // Reduced brightness
-  FastLED.clear();
+  FastLED.clear(true);
   FastLED.show();
 
   // Initialize LCD
@@ -227,14 +229,17 @@ void loop() {
     case PLACING_SHIPS:
       digitalWrite(CPU_SIGNAL_PIN, HIGH);  // Signal CPU Arduino
       playerPlaceShips();
+      updatePlayerMatrix(); // Update the player's LED matrix
       break;
     case PLAYER_TURN:
       digitalWrite(CPU_SIGNAL_PIN, LOW);
       playerAttack();
+      updateCPUMatrix(); // Update the CPU's LED matrix with attack results
       break;
     case ARDUINO_TURN:
       digitalWrite(CPU_SIGNAL_PIN, LOW);
       arduinoAttack();
+      updatePlayerMatrix(); // Update the player's LED matrix with attack results
       break;
     case GAME_OVER:
       digitalWrite(CPU_SIGNAL_PIN, LOW);
@@ -297,8 +302,9 @@ void resetGame() {
   Serial.println(F("Game reset."));
   Serial.println(F("Player, place your ships."));
 
-  // Update the LED matrix
-  updateLEDMatrix();
+  // Update the LED matrices
+  updatePlayerMatrix();
+  updateCPUMatrix();
 }
 
 void initializeGrids() {
@@ -369,7 +375,9 @@ void playerPlaceShips() {
     lcd.clear();
     lcd.print(F("Your Turn"));
     Serial.println(F("All ships placed. Your turn to attack."));
-    updateLEDMatrix();
+    // Update both LED matrices
+    updatePlayerMatrix();
+    updateCPUMatrix();
     return;
   }
 
@@ -436,8 +444,8 @@ void playerPlaceShips() {
     lcd.print(cursorY);
     lcd.print(playerShipHorizontal ? " H" : " V"); // Orientation
 
-    // Update the LED matrix
-    updateLEDMatrix();
+    // Update the player's LED matrix
+    updatePlayerMatrix();
   }
 }
 
@@ -476,25 +484,45 @@ bool updateCursorPosition() {
 
 void handleJoystickButton() {
   joystickButtonState = digitalRead(JOYSTICK_BUTTON_PIN);
+
+  unsigned long currentTime = millis();
+
   if (joystickButtonState != lastJoystickButtonState) {
     if (joystickButtonState == LOW) {
       // Button pressed
-      unsigned long currentTime = millis();
-      if (currentTime - lastJoystickButtonReleaseTime < joystickDoubleClickThreshold) {
+      if (currentTime - lastJoystickButtonPressTime < joystickDoubleClickThreshold) {
+        // Detected a second press within the threshold
         joystickButtonClickCount++;
+        Serial.print("Click count: ");
+        Serial.println(joystickButtonClickCount);
       } else {
+        // First click
         joystickButtonClickCount = 1;
+        Serial.println("First click detected");
       }
-      lastJoystickButtonReleaseTime = currentTime;
-
-      if (joystickButtonClickCount == 2) {
-        // Double-click detected, toggle orientation
-        playerShipHorizontal = !playerShipHorizontal;
-        playBuzzerTone(800, 100);
-        joystickButtonClickCount = 0;
-      }
+      lastJoystickButtonPressTime = currentTime;
+    } else {
+      // Button released
+      // No action needed on release
     }
     lastJoystickButtonState = joystickButtonState;
+  }
+
+  // Check for double-click
+  if (joystickButtonClickCount == 2 && (currentTime - lastJoystickButtonPressTime) < joystickDoubleClickThreshold) {
+    // Double-click detected, toggle orientation
+    playerShipHorizontal = !playerShipHorizontal;
+    playBuzzerTone(800, 100);
+    Serial.println("Orientation toggled via double-click");
+    joystickButtonClickCount = 0; // Reset click count
+  }
+
+  // Reset click count if too much time has passed
+  if ((currentTime - lastJoystickButtonPressTime) > joystickDoubleClickThreshold) {
+    if (joystickButtonClickCount != 0) {
+      Serial.println("Click count reset due to timeout");
+    }
+    joystickButtonClickCount = 0;
   }
 }
 
@@ -536,6 +564,7 @@ void playerAttack() {
           } else {
             // Miss
             setCellState(playerAttackGrid, cursorX, cursorY, CELL_MISS);
+            setCellState(arduinoGrid, cursorX, cursorY, CELL_MISS);
             lcd.clear();
             lcd.print(F("Missed"));
             Serial.print(F("Player missed at ("));
@@ -555,7 +584,7 @@ void playerAttack() {
             lcd.print(F("You Win!"));
             Serial.println(F("Player wins the game!"));
             playBuzzerTone(2000, 1000);  // Victory tone
-            updateLEDMatrix(); // Update LEDs to reflect the win
+            updateCPUMatrix(); // Update CPU matrix to reflect the win
             return;
           }
 
@@ -586,8 +615,8 @@ void playerAttack() {
     lcd.print(F(" Y:"));
     lcd.print(cursorY);
 
-    // Update the LED matrix
-    updateLEDMatrix();
+    // Update the CPU's LED matrix
+    updateCPUMatrix();
   }
 }
 
@@ -632,6 +661,7 @@ void arduinoAttack() {
     } else {
       // Miss
       setCellState(arduinoAttackGrid, x, y, CELL_MISS);
+      setCellState(playerGrid, x, y, CELL_MISS);
       lcd.clear();
       lcd.print(F("Arduino Miss at"));
       lcd.setCursor(0, 1);
@@ -711,6 +741,7 @@ void arduinoAttack() {
       } else {
         // Miss
         setCellState(arduinoAttackGrid, x, y, CELL_MISS);
+        setCellState(playerGrid, x, y, CELL_MISS);
         lcd.clear();
         lcd.print(F("Arduino Miss at"));
         lcd.setCursor(0, 1);
@@ -737,7 +768,7 @@ void arduinoAttack() {
     lcd.print(F("Arduino Wins!"));
     Serial.println(F("Arduino wins the game!"));
     playBuzzerTone(100, 1000);  // Defeat tone
-    updateLEDMatrix(); // Update LEDs to reflect the loss
+    updatePlayerMatrix(); // Update player's matrix to reflect the loss
     return;
   }
 
@@ -770,11 +801,11 @@ void displayShipCounts(uint8_t playerShips, uint8_t arduinoShips) {
   lcd.print(arduinoShips);
 }
 
-void updateLEDMatrix() {
-  // Clear the LEDs
-  FastLED.clear();
+void updatePlayerMatrix() {
+  // Clear the player's LEDs
+  fill_solid(ledsPlayer, NUM_LEDS, CRGB::Black);
 
-  // Loop through the game grid
+  // Loop through the player's grid
   for (uint8_t y = 0; y < GRID_SIZE; y++) {
     for (uint8_t x = 0; x < GRID_SIZE; x++) {
       int ledIndex = getLEDIndex(x, y);
@@ -783,8 +814,8 @@ void updateLEDMatrix() {
         // Determine the color for this cell
         CRGB color = CRGB::Black; // Default color
 
-        // Cursor position
-        if (x == cursorX && y == cursorY) {
+        // Cursor position during ship placement
+        if (gameState == PLACING_SHIPS && x == cursorX && y == cursorY) {
           color = CRGB::White;
         }
 
@@ -795,27 +826,62 @@ void updateLEDMatrix() {
           color = CRGB::Green; // Ship part
         } else if (cellState == CELL_HIT) {
           color = CRGB::Red; // Hit ship part
-        }
-
-        // Ship preview during placement
-        if (gameState == PLACING_SHIPS &&
-            isShipPreviewPosition(x, y)) {
-          color = CRGB::Yellow;  // Ship preview
-        }
-
-        // Attacks by Arduino
-        uint8_t arduinoAttackState = getCellState(arduinoAttackGrid, x, y);
-        if (arduinoAttackState == CELL_MISS) {
+        } else if (cellState == CELL_MISS) {
           color = CRGB::Blue; // Missed attack
         }
 
-        leds[ledIndex] = color;
+        // Ship preview during placement
+        if (gameState == PLACING_SHIPS && isShipPreviewPosition(x, y)) {
+          color = CRGB::Yellow;  // Ship preview
+        }
+
+        ledsPlayer[ledIndex] = color;
       }
     }
   }
 
-  // Show the LEDs
-  FastLED.show();
+  // Show the player's LEDs
+  FastLED[0].show();
+}
+
+void updateCPUMatrix() {
+  // Clear the CPU's LEDs
+  fill_solid(ledsCPU, NUM_LEDS, CRGB::Black);
+
+  // Loop through the CPU's grid
+  for (uint8_t y = 0; y < GRID_SIZE; y++) {
+    for (uint8_t x = 0; x < GRID_SIZE; x++) {
+      int ledIndex = getLEDIndex(x, y);
+
+      if (ledIndex >= 0 && ledIndex < NUM_LEDS) {
+        // Determine the color for this cell
+        CRGB color = CRGB::Black; // Default color
+
+        // Cursor position during attack phase
+        if (gameState == PLAYER_TURN && x == cursorX && y == cursorY) {
+          color = CRGB::White;
+        }
+
+        // Cell state
+        uint8_t cellState = getCellState(arduinoGrid, x, y);
+        uint8_t attackState = getCellState(playerAttackGrid, x, y);
+
+        if (attackState == CELL_HIT) {
+          color = CRGB::Red; // Hit ship part
+        } else if (attackState == CELL_MISS) {
+          color = CRGB::Blue; // Missed attack
+        } else {
+          // Hide ships, do not show CELL_SHIP
+          color = CRGB::Black;
+        }
+
+        ledsCPU[ledIndex] = color;
+      }
+    }
+  }
+
+  // Show the CPU's LEDs
+  FastLED[1].show();
 }
 
 bool isShipPreviewPosition(uint8_t x, uint8_t y) {
