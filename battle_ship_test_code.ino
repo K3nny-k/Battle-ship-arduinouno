@@ -138,7 +138,7 @@ int getLEDIndex(int x, int y);
 void setCellState(uint8_t* grid, uint8_t x, uint8_t y, uint8_t state);
 uint8_t getCellState(uint8_t* grid, uint8_t x, uint8_t y);
 void handleJoystickButton();
-unsigned long lastJoystickButtonPressTime = 0; // Initialize to 0
+//unsigned long lastJoystickButtonPressTime = 0; // Initialize to 0
 
 LiquidCrystal_I2C lcd(0x27, 16, 2); // Initialize LCD
 
