@@ -1,4 +1,4 @@
-// Game Arduino Code: Battleship Game with Separate LED Matrices for Player and CPU
+// Optimized Game Arduino Code: Battleship Game with 12x12 LED Matrices
 
 #include <FastLED.h>
 #include <Wire.h>
@@ -14,19 +14,20 @@
 #define CPU_SIGNAL_PIN 7       // Signal pin to CPU Arduino
 
 // LED Matrix definitions
-#define NUM_LEDS 256 // 16x16 LED matrix for each
+#define MATRIX_SIZE 12
+#define NUM_LEDS (MATRIX_SIZE * MATRIX_SIZE) // 12x12 LED matrix
 #define DATA_PIN_PLAYER 3
 #define DATA_PIN_CPU 5
 
 CRGB ledsPlayer[NUM_LEDS];
 CRGB ledsCPU[NUM_LEDS];
 
-// Define the size of the game grid
+// Define the size of the game grid (10x10 game grid within 12x12 matrix)
 #define GRID_SIZE 10
 
-// Define offsets to center the 10x10 grid on a 16x16 LED matrix
-#define GRID_OFFSET_X 3
-#define GRID_OFFSET_Y 3
+// Define offsets to center the 10x10 grid on a 12x12 LED matrix
+#define GRID_OFFSET_X ((MATRIX_SIZE - GRID_SIZE) / 2) // (12 - 10) / 2 = 1
+#define GRID_OFFSET_Y ((MATRIX_SIZE - GRID_SIZE) / 2) // (12 - 10) / 2 = 1
 
 // Game constants
 #define NUM_SHIPS 5  // Number of ships
@@ -43,40 +44,52 @@ struct Ship {
   uint8_t size;
 };
 
+// Store ship names in PROGMEM to save RAM
+const char carrierName[] PROGMEM = "Carrier";
+const char battleshipName[] PROGMEM = "Battleship";
+const char cruiserName[] PROGMEM = "Cruiser";
+const char submarineName[] PROGMEM = "Submarine";
+const char destroyerName[] PROGMEM = "Destroyer";
+
 const Ship ships[NUM_SHIPS] PROGMEM = {
-  {"Carrier", 5},
-  {"Battleship", 4},
-  {"Cruiser", 3},
-  {"Submarine", 3},
-  {"Destroyer", 2}
+  {carrierName, 5},
+  {battleshipName, 4},
+  {cruiserName, 3},
+  {submarineName, 3},
+  {destroyerName, 2}
 };
 
 // Grids represented as bitfields (arrays of bytes)
-uint8_t playerGrid[(GRID_SIZE * GRID_SIZE + 3) / 4 + 1];   // 26 bytes
-uint8_t arduinoGrid[(GRID_SIZE * GRID_SIZE + 3) / 4 + 1];  // 26 bytes
-uint8_t playerAttackGrid[(GRID_SIZE * GRID_SIZE + 3) / 4 + 1];   // 26 bytes
-uint8_t arduinoAttackGrid[(GRID_SIZE * GRID_SIZE + 3) / 4 + 1];  // 26 bytes
+// Each cell uses 2 bits; total bits needed = GRID_SIZE * GRID_SIZE * 2
+// Total bytes needed = (total bits + 7) / 8
+const uint16_t totalGridBits = GRID_SIZE * GRID_SIZE * 2;
+const uint16_t totalGridBytes = (totalGridBits + 7) / 8;
+
+uint8_t playerGrid[totalGridBytes];
+uint8_t arduinoGrid[totalGridBytes];
+uint8_t playerAttackGrid[totalGridBytes];
+uint8_t arduinoAttackGrid[totalGridBytes];
 
 // Cursor position
 uint8_t cursorX = 0;
 uint8_t cursorY = 0;
 
 // Button state variables
-byte redButtonState = HIGH;
-byte lastRedButtonState = HIGH;
-byte blueButtonState = HIGH;
-byte lastBlueButtonState = HIGH;
+uint8_t redButtonState = HIGH;
+uint8_t lastRedButtonState = HIGH;
+uint8_t blueButtonState = HIGH;
+uint8_t lastBlueButtonState = HIGH;
 
 // Blue button long press variables
 unsigned long blueButtonPressTime = 0;
 bool blueButtonLongPressHandled = false;
 bool blueButtonShortPress = false;
 unsigned long lastBlueDebounceTime = 0;
-unsigned long blueDebounceDelay = 50; // 50 ms debounce
+const unsigned long blueDebounceDelay = 50; // 50 ms debounce
 
 // Debounce variables for red button
 unsigned long lastRedDebounceTime = 0;
-unsigned long redDebounceDelay = 50; // 50 milliseconds debounce delay
+const unsigned long redDebounceDelay = 50; // 50 milliseconds debounce delay
 
 // Joystick thresholds
 #define JOYSTICK_THRESHOLD 200
@@ -85,22 +98,22 @@ unsigned long lastJoystickMoveTime = 0;
 #define JOYSTICK_MOVE_DELAY 200  // Delay between moves in ms
 
 // Joystick button variables for orientation change
-byte joystickButtonState = HIGH;
-byte lastJoystickButtonState = HIGH;
+uint8_t joystickButtonState = HIGH;
+uint8_t lastJoystickButtonState = HIGH;
 unsigned long lastJoystickButtonPressTime = 0; // Added this line
-unsigned long joystickDoubleClickThreshold = 500; // 500 ms
-int joystickButtonClickCount = 0;
+const unsigned long joystickDoubleClickThreshold = 500; // 500 ms
+uint8_t joystickButtonClickCount = 0;
 
 // Game states
-enum GameState { WAITING_TO_START, PLACING_SHIPS,
-                 PLAYER_TURN, ARDUINO_TURN, GAME_OVER };
+enum GameState : uint8_t { WAITING_TO_START, PLACING_SHIPS,
+                           PLAYER_TURN, ARDUINO_TURN, GAME_OVER };
 GameState gameState = WAITING_TO_START;
 
 // Orientation variable for player's ships
 bool playerShipHorizontal = true; // true = horizontal
 
 // Arduino attack state variables
-enum AttackMode { HUNT_MODE, TARGET_MODE };
+enum AttackMode : uint8_t { HUNT_MODE, TARGET_MODE };
 AttackMode arduinoAttackMode = HUNT_MODE;
 
 uint8_t lastHitX;
@@ -119,20 +132,20 @@ void playerPlaceShips();
 void playerAttack();
 void arduinoAttack();
 bool updateCursorPosition();
-void playBuzzerTone(int frequency, int duration);
+void playBuzzerTone(uint16_t frequency, uint16_t duration);
 bool canPlaceShip(uint8_t* grid, uint8_t x, uint8_t y, uint8_t size, bool horizontal);
 void placeShip(uint8_t* grid, uint8_t x, uint8_t y, uint8_t size, bool horizontal);
 void resetGame();
 uint8_t countRemainingShips(uint8_t* grid);
-void displayShipCounts(uint8_t playerShips, uint8_t arduinoShips);
 void updatePlayerMatrix();
 void updateCPUMatrix();
 bool isShipPreviewPosition(uint8_t x, uint8_t y);
-int getLEDIndex(int x, int y);
+int16_t getLEDIndex(int16_t x, int16_t y);
 void setCellState(uint8_t* grid, uint8_t x, uint8_t y, uint8_t state);
 uint8_t getCellState(uint8_t* grid, uint8_t x, uint8_t y);
 void handleJoystickButton();
 
+// Initialize LCD (consider using a smaller LCD or removing if memory is still tight)
 LiquidCrystal_I2C lcd(0x27, 16, 2); // Initialize LCD
 
 void setup() {
@@ -382,7 +395,7 @@ void playerPlaceShips() {
   bool cursorMoved = updateCursorPosition();
 
   // Handle red button for placing ships
-  byte redReading = digitalRead(RED_BUTTON_PIN);
+  uint8_t redReading = digitalRead(RED_BUTTON_PIN);
 
   if (redReading != lastRedButtonState) {
     lastRedDebounceTime = millis();
@@ -399,7 +412,10 @@ void playerPlaceShips() {
           shipId++;
           playBuzzerTone(1000, 200);  // Confirmation tone
           Serial.print(F("Player placed "));
-          Serial.print(currentShip.name);
+          // Retrieve ship name from PROGMEM
+          char shipName[12];
+          strcpy_P(shipName, currentShip.name);
+          Serial.print(shipName);
           Serial.print(F(" at ("));
           Serial.print(cursorX);
           Serial.print(F(", "));
@@ -429,7 +445,10 @@ void playerPlaceShips() {
     lcd.clear();
     lcd.setCursor(0, 0);
     lcd.print(F("Place "));
-    lcd.print(currentShip.name);
+    // Retrieve ship name from PROGMEM
+    char shipName[12];
+    strcpy_P(shipName, currentShip.name);
+    lcd.print(shipName);
     lcd.setCursor(0, 1);
     lcd.print(F("X:"));
     lcd.print(cursorX);
@@ -443,8 +462,8 @@ void playerPlaceShips() {
 }
 
 bool updateCursorPosition() {
-  int xValue = analogRead(JOYSTICK_X_PIN);
-  int yValue = analogRead(JOYSTICK_Y_PIN);
+  int16_t xValue = analogRead(JOYSTICK_X_PIN);
+  int16_t yValue = analogRead(JOYSTICK_Y_PIN);
   unsigned long currentTime = millis();
   bool moved = false;
 
@@ -486,17 +505,11 @@ void handleJoystickButton() {
       if (currentTime - lastJoystickButtonPressTime < joystickDoubleClickThreshold) {
         // Detected a second press within the threshold
         joystickButtonClickCount++;
-        Serial.print("Click count: ");
-        Serial.println(joystickButtonClickCount);
       } else {
         // First click
         joystickButtonClickCount = 1;
-        Serial.println("First click detected");
       }
       lastJoystickButtonPressTime = currentTime;
-    } else {
-      // Button released
-      // No action needed on release
     }
     lastJoystickButtonState = joystickButtonState;
   }
@@ -506,15 +519,11 @@ void handleJoystickButton() {
     // Double-click detected, toggle orientation
     playerShipHorizontal = !playerShipHorizontal;
     playBuzzerTone(800, 100);
-    Serial.println("Orientation toggled via double-click");
     joystickButtonClickCount = 0; // Reset click count
   }
 
   // Reset click count if too much time has passed
   if ((currentTime - lastJoystickButtonPressTime) > joystickDoubleClickThreshold) {
-    if (joystickButtonClickCount != 0) {
-      Serial.println("Click count reset due to timeout");
-    }
     joystickButtonClickCount = 0;
   }
 }
@@ -526,7 +535,7 @@ void playerAttack() {
   bool cursorMoved = updateCursorPosition();
 
   // Handle red button for confirming attacks
-  byte redReading = digitalRead(RED_BUTTON_PIN);
+  uint8_t redReading = digitalRead(RED_BUTTON_PIN);
 
   if (redReading != lastRedButtonState) {
     lastRedDebounceTime = millis();
@@ -614,7 +623,7 @@ void playerAttack() {
 }
 
 void arduinoAttack() {
-  uint8_t x, y;
+  uint8_t x = 0, y = 0;
   bool validAttack = false;
 
   if (arduinoAttackMode == HUNT_MODE) {
@@ -769,7 +778,7 @@ void arduinoAttack() {
   gameState = PLAYER_TURN;
 }
 
-void playBuzzerTone(int frequency, int duration) {
+void playBuzzerTone(uint16_t frequency, uint16_t duration) {
   tone(BUZZER_PIN, frequency, duration);
 }
 
@@ -785,15 +794,6 @@ uint8_t countRemainingShips(uint8_t* grid) {
   return shipsRemaining;
 }
 
-void displayShipCounts(uint8_t playerShips, uint8_t arduinoShips) {
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print(F("You:"));
-  lcd.print(playerShips);
-  lcd.print(F(" CPU:"));
-  lcd.print(arduinoShips);
-}
-
 void updatePlayerMatrix() {
   // Clear the player's LEDs
   fill_solid(ledsPlayer, NUM_LEDS, CRGB::Black);
@@ -801,7 +801,7 @@ void updatePlayerMatrix() {
   // Loop through the player's grid
   for (uint8_t y = 0; y < GRID_SIZE; y++) {
     for (uint8_t x = 0; x < GRID_SIZE; x++) {
-      int ledIndex = getLEDIndex(x, y);
+      int16_t ledIndex = getLEDIndex(x, y);
 
       if (ledIndex >= 0 && ledIndex < NUM_LEDS) {
         // Determine the color for this cell
@@ -844,7 +844,7 @@ void updateCPUMatrix() {
   // Loop through the CPU's grid
   for (uint8_t y = 0; y < GRID_SIZE; y++) {
     for (uint8_t x = 0; x < GRID_SIZE; x++) {
-      int ledIndex = getLEDIndex(x, y);
+      int16_t ledIndex = getLEDIndex(x, y);
 
       if (ledIndex >= 0 && ledIndex < NUM_LEDS) {
         // Determine the color for this cell
@@ -918,18 +918,18 @@ bool isShipPreviewPosition(uint8_t x, uint8_t y) {
   return false;
 }
 
-int getLEDIndex(int x, int y) {
-  // Adjust x and y to the physical location in the 16x16 matrix
-  int adjustedX = x + GRID_OFFSET_X;
-  int adjustedY = y + GRID_OFFSET_Y;
-  int ledIndex;
+int16_t getLEDIndex(int16_t x, int16_t y) {
+  // Adjust x and y to the physical location in the 12x12 matrix
+  int16_t adjustedX = x + GRID_OFFSET_X;
+  int16_t adjustedY = y + GRID_OFFSET_Y;
+  int16_t ledIndex;
 
   if (adjustedY % 2 == 0) {
     // Even row, left to right
-    ledIndex = adjustedY * 16 + adjustedX;
+    ledIndex = adjustedY * MATRIX_SIZE + adjustedX;
   } else {
     // Odd row, right to left
-    ledIndex = adjustedY * 16 + (15 - adjustedX);
+    ledIndex = adjustedY * MATRIX_SIZE + (MATRIX_SIZE - 1 - adjustedX);
   }
 
   // Ensure ledIndex is within bounds
@@ -942,15 +942,36 @@ int getLEDIndex(int x, int y) {
 
 void setCellState(uint8_t* grid, uint8_t x, uint8_t y, uint8_t state) {
   uint16_t index = y * GRID_SIZE + x;
-  uint16_t byteIndex = index / 4;
-  uint8_t bitOffset = (index % 4) * 2;
-  grid[byteIndex] &= ~(0b11 << bitOffset); // Clear bits
-  grid[byteIndex] |= (state & 0b11) << bitOffset; // Set bits
+  uint16_t bitIndex = index * 2; // Each cell uses 2 bits
+  uint16_t byteIndex = bitIndex / 8;
+  uint8_t bitOffset = bitIndex % 8;
+  uint8_t mask = 0b11 << bitOffset;
+
+  grid[byteIndex] = (grid[byteIndex] & ~mask) | ((state & 0b11) << bitOffset);
+
+  // Handle cross-byte boundary
+  if (bitOffset > 6) {
+    byteIndex++;
+    bitOffset = (bitOffset + 2) % 8;
+    mask = 0b11 >> (6 - bitOffset);
+    grid[byteIndex] = (grid[byteIndex] & ~mask) | ((state & 0b11) >> (8 - bitOffset));
+  }
 }
 
 uint8_t getCellState(uint8_t* grid, uint8_t x, uint8_t y) {
   uint16_t index = y * GRID_SIZE + x;
-  uint16_t byteIndex = index / 4;
-  uint8_t bitOffset = (index % 4) * 2;
-  return (grid[byteIndex] >> bitOffset) & 0b11;
+  uint16_t bitIndex = index * 2; // Each cell uses 2 bits
+  uint16_t byteIndex = bitIndex / 8;
+  uint8_t bitOffset = bitIndex % 8;
+  uint8_t state = (grid[byteIndex] >> bitOffset) & 0b11;
+
+  // Handle cross-byte boundary
+  if (bitOffset > 6) {
+    byteIndex++;
+    bitOffset = (bitOffset + 2) % 8;
+    uint8_t nextBits = grid[byteIndex] & (0b11 >> (6 - bitOffset));
+    state |= nextBits << (8 - bitOffset);
+  }
+
+  return state;
 }
