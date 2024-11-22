@@ -1,7 +1,6 @@
-// Optimized Game Arduino Code: Battleship Game with 12x12 LED Matrices
+// Optimized Arduino Code: Battleship Game with LCD and Memory Efficiency
 
 #include <FastLED.h>
-#include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 
 // Define pins
@@ -13,21 +12,16 @@
 #define BLUE_BUTTON_PIN 13     // For starting/resetting the game
 #define CPU_SIGNAL_PIN 7       // Signal pin to CPU Arduino
 
+// Game grid size
+#define GRID_SIZE 10
+
 // LED Matrix definitions
-#define MATRIX_SIZE 12
-#define NUM_LEDS (MATRIX_SIZE * MATRIX_SIZE) // 12x12 LED matrix
+#define NUM_LEDS (GRID_SIZE * GRID_SIZE) // 10x10 grid
 #define DATA_PIN_PLAYER 3
 #define DATA_PIN_CPU 5
 
 CRGB ledsPlayer[NUM_LEDS];
 CRGB ledsCPU[NUM_LEDS];
-
-// Define the size of the game grid (10x10 game grid within 12x12 matrix)
-#define GRID_SIZE 10
-
-// Define offsets to center the 10x10 grid on a 12x12 LED matrix
-#define GRID_OFFSET_X ((MATRIX_SIZE - GRID_SIZE) / 2) // (12 - 10) / 2 = 1
-#define GRID_OFFSET_Y ((MATRIX_SIZE - GRID_SIZE) / 2) // (12 - 10) / 2 = 1
 
 // Game constants
 #define NUM_SHIPS 5  // Number of ships
@@ -60,8 +54,6 @@ const Ship ships[NUM_SHIPS] PROGMEM = {
 };
 
 // Grids represented as bitfields (arrays of bytes)
-// Each cell uses 2 bits; total bits needed = GRID_SIZE * GRID_SIZE * 2
-// Total bytes needed = (total bits + 7) / 8
 const uint16_t totalGridBits = GRID_SIZE * GRID_SIZE * 2;
 const uint16_t totalGridBytes = (totalGridBits + 7) / 8;
 
@@ -84,7 +76,6 @@ uint8_t lastBlueButtonState = HIGH;
 unsigned long blueButtonPressTime = 0;
 bool blueButtonLongPressHandled = false;
 bool blueButtonShortPress = false;
-unsigned long lastBlueDebounceTime = 0;
 const unsigned long blueDebounceDelay = 50; // 50 ms debounce
 
 // Debounce variables for red button
@@ -100,9 +91,6 @@ unsigned long lastJoystickMoveTime = 0;
 // Joystick button variables for orientation change
 uint8_t joystickButtonState = HIGH;
 uint8_t lastJoystickButtonState = HIGH;
-unsigned long lastJoystickButtonPressTime = 0; // Added this line
-const unsigned long joystickDoubleClickThreshold = 500; // 500 ms
-uint8_t joystickButtonClickCount = 0;
 
 // Game states
 enum GameState : uint8_t { WAITING_TO_START, PLACING_SHIPS,
@@ -145,8 +133,8 @@ void setCellState(uint8_t* grid, uint8_t x, uint8_t y, uint8_t state);
 uint8_t getCellState(uint8_t* grid, uint8_t x, uint8_t y);
 void handleJoystickButton();
 
-// Initialize LCD (consider using a smaller LCD or removing if memory is still tight)
-LiquidCrystal_I2C lcd(0x27, 16, 2); // Initialize LCD
+// Initialize LCD
+LiquidCrystal_I2C lcd(0x27, 16, 2); // Initialize LCD with I2C address 0x27 and 16x2 size
 
 void setup() {
   // Initialize components
@@ -168,17 +156,17 @@ void setup() {
   lcd.init();
   lcd.backlight();
 
-  Serial.begin(9600);
+  // Initialize Serial for debugging (optional)
+  // Serial.begin(9600); // Commented out to save memory
+  // Serial.println(F("Battleship Game"));
+  // Serial.println(F("Press the blue button to start."));
 
-  // Display welcome message
+  // Display welcome message on LCD
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print(F("Battleship Game"));
   lcd.setCursor(0, 1);
   lcd.print(F("Press Blue Btn"));
-
-  Serial.println(F("Battleship Game"));
-  Serial.println(F("Press the blue button to start."));
 }
 
 void loop() {
@@ -194,9 +182,7 @@ void loop() {
     } else {
       // Button released
       unsigned long pressDuration = millis() - blueButtonPressTime;
-      if (pressDuration >= 2000) {
-        // Long press handled in the loop
-      } else {
+      if (pressDuration < 2000 && blueButtonPressTime != 0) {
         // Short press detected
         blueButtonShortPress = true;
       }
@@ -206,7 +192,7 @@ void loop() {
   }
 
   // Handle long press
-  if (blueButtonState == LOW && !blueButtonLongPressHandled) {
+  if (blueButtonState == LOW && !blueButtonLongPressHandled && blueButtonPressTime != 0) {
     unsigned long pressDuration = millis() - blueButtonPressTime;
     if (pressDuration >= 2000) { // Long press threshold
       // Long press detected
@@ -279,8 +265,6 @@ void resetGame() {
 
   // Reset joystick button states
   lastJoystickButtonState = HIGH;
-  lastJoystickButtonPressTime = 0;
-  joystickButtonClickCount = 0;
 
   // Reset orientation
   playerShipHorizontal = true;
@@ -298,15 +282,12 @@ void resetGame() {
   // Set game state
   gameState = PLACING_SHIPS;
 
-  // Display message
+  // Display message on LCD
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print(F("Place your ships"));
   lcd.setCursor(0, 1);
   lcd.print(F("Use Btns & Joy"));
-
-  Serial.println(F("Game reset."));
-  Serial.println(F("Player, place your ships."));
 
   // Update the LED matrices
   updatePlayerMatrix();
@@ -378,9 +359,12 @@ void playerPlaceShips() {
   // Check if all ships have been placed
   if (shipId >= NUM_SHIPS) {
     gameState = PLAYER_TURN;
+    // Display message on LCD
     lcd.clear();
+    lcd.setCursor(0, 0);
     lcd.print(F("Your Turn"));
-    Serial.println(F("All ships placed. Your turn to attack."));
+    lcd.setCursor(0, 1);
+    lcd.print(F("Attack CPU"));
     // Update both LED matrices
     updatePlayerMatrix();
     updateCPUMatrix();
@@ -411,23 +395,32 @@ void playerPlaceShips() {
           placeShip(playerGrid, cursorX, cursorY, currentShip.size, playerShipHorizontal);
           shipId++;
           playBuzzerTone(1000, 200);  // Confirmation tone
-          Serial.print(F("Player placed "));
+
           // Retrieve ship name from PROGMEM
           char shipName[12];
           strcpy_P(shipName, currentShip.name);
-          Serial.print(shipName);
-          Serial.print(F(" at ("));
-          Serial.print(cursorX);
-          Serial.print(F(", "));
-          Serial.print(cursorY);
-          Serial.print(F(") "));
-          Serial.println(playerShipHorizontal ? "Horizontal" : "Vertical");
+
+          // Display placement confirmation on LCD
+          lcd.clear();
+          lcd.setCursor(0, 0);
+          lcd.print(F("Placed "));
+          lcd.print(shipName);
+          lcd.setCursor(0, 1);
+          lcd.print(F("X:"));
+          lcd.print(cursorX);
+          lcd.print(F(" Y:"));
+          lcd.print(cursorY);
+          lcd.print(playerShipHorizontal ? " H" : " V"); // Orientation
+
           displayUpdated = true;
         } else {
           // Cannot place ship here
-          lcd.setCursor(0, 1);
-          lcd.print(F("Cannot place here"));
           playBuzzerTone(500, 200);  // Error tone
+          lcd.clear();
+          lcd.setCursor(0, 0);
+          lcd.print(F("Cannot Place"));
+          lcd.setCursor(0, 1);
+          lcd.print(F("Here"));
           delay(500);
           displayUpdated = true;
         }
@@ -441,7 +434,7 @@ void playerPlaceShips() {
 
   // If cursor moved or display needs updating
   if (cursorMoved || displayUpdated) {
-    // Draw current ship position on LCD
+    // Display current ship placement status on LCD
     lcd.clear();
     lcd.setCursor(0, 0);
     lcd.print(F("Place "));
@@ -497,34 +490,13 @@ bool updateCursorPosition() {
 void handleJoystickButton() {
   joystickButtonState = digitalRead(JOYSTICK_BUTTON_PIN);
 
-  unsigned long currentTime = millis();
-
   if (joystickButtonState != lastJoystickButtonState) {
     if (joystickButtonState == LOW) {
-      // Button pressed
-      if (currentTime - lastJoystickButtonPressTime < joystickDoubleClickThreshold) {
-        // Detected a second press within the threshold
-        joystickButtonClickCount++;
-      } else {
-        // First click
-        joystickButtonClickCount = 1;
-      }
-      lastJoystickButtonPressTime = currentTime;
+      // Button pressed, toggle orientation
+      playerShipHorizontal = !playerShipHorizontal;
+      playBuzzerTone(800, 100);
     }
     lastJoystickButtonState = joystickButtonState;
-  }
-
-  // Check for double-click
-  if (joystickButtonClickCount == 2 && (currentTime - lastJoystickButtonPressTime) < joystickDoubleClickThreshold) {
-    // Double-click detected, toggle orientation
-    playerShipHorizontal = !playerShipHorizontal;
-    playBuzzerTone(800, 100);
-    joystickButtonClickCount = 0; // Reset click count
-  }
-
-  // Reset click count if too much time has passed
-  if ((currentTime - lastJoystickButtonPressTime) > joystickDoubleClickThreshold) {
-    joystickButtonClickCount = 0;
   }
 }
 
@@ -554,27 +526,35 @@ void playerAttack() {
             // Hit
             setCellState(playerAttackGrid, cursorX, cursorY, CELL_HIT);
             setCellState(arduinoGrid, cursorX, cursorY, CELL_HIT);
-            lcd.clear();
-            lcd.print(F("It's a Hit!"));
-            Serial.print(F("Player hit at ("));
-            Serial.print(cursorX);
-            Serial.print(F(", "));
-            Serial.print(cursorY);
-            Serial.println(F(")"));
             playBuzzerTone(1500, 500);  // Hit tone
+
+            // Display hit confirmation on LCD
+            lcd.clear();
+            lcd.setCursor(0, 0);
+            lcd.print(F("Hit!"));
+            lcd.setCursor(0, 1);
+            lcd.print(F("X:"));
+            lcd.print(cursorX);
+            lcd.print(F(" Y:"));
+            lcd.print(cursorY);
+
             displayUpdated = true;
           } else {
             // Miss
             setCellState(playerAttackGrid, cursorX, cursorY, CELL_MISS);
             setCellState(arduinoGrid, cursorX, cursorY, CELL_MISS);
-            lcd.clear();
-            lcd.print(F("Missed"));
-            Serial.print(F("Player missed at ("));
-            Serial.print(cursorX);
-            Serial.print(F(", "));
-            Serial.print(cursorY);
-            Serial.println(F(")"));
             playBuzzerTone(500, 200);  // Miss tone
+
+            // Display miss confirmation on LCD
+            lcd.clear();
+            lcd.setCursor(0, 0);
+            lcd.print(F("Missed"));
+            lcd.setCursor(0, 1);
+            lcd.print(F("X:"));
+            lcd.print(cursorX);
+            lcd.print(F(" Y:"));
+            lcd.print(cursorY);
+
             displayUpdated = true;
           }
 
@@ -583,8 +563,10 @@ void playerAttack() {
           if (arduinoShipsRemaining == 0) {
             gameState = GAME_OVER;
             lcd.clear();
+            lcd.setCursor(0, 0);
             lcd.print(F("You Win!"));
-            Serial.println(F("Player wins the game!"));
+            lcd.setCursor(0, 1);
+            lcd.print(F("Press Blue Btn"));
             playBuzzerTone(2000, 1000);  // Victory tone
             updateCPUMatrix(); // Update CPU matrix to reflect the win
             return;
@@ -594,9 +576,12 @@ void playerAttack() {
           gameState = ARDUINO_TURN;
         } else {
           // Already tried this position
-          lcd.setCursor(0, 1);
-          lcd.print(F("Already tried"));
           playBuzzerTone(500, 200);  // Error tone
+          lcd.clear();
+          lcd.setCursor(0, 0);
+          lcd.print(F("Already"));
+          lcd.setCursor(0, 1);
+          lcd.print(F("Attacked"));
           delay(500);
           displayUpdated = true;
         }
@@ -607,16 +592,6 @@ void playerAttack() {
 
   // If cursor moved or display needs updating
   if (cursorMoved || displayUpdated) {
-    // Draw current cursor position
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print(F("Attack at"));
-    lcd.setCursor(0, 1);
-    lcd.print(F("X:"));
-    lcd.print(cursorX);
-    lcd.print(F(" Y:"));
-    lcd.print(cursorY);
-
     // Update the CPU's LED matrix
     updateCPUMatrix();
   }
@@ -636,11 +611,7 @@ void arduinoAttack() {
       }
     } while (!validAttack);
 
-    Serial.print(F("Arduino attacks at ("));
-    Serial.print(x);
-    Serial.print(F(", "));
-    Serial.print(y);
-    Serial.println(F(")"));
+    playBuzzerTone(1500, 500);  // Hit tone or confirmation
 
     if (getCellState(playerGrid, x, y) == CELL_SHIP) {
       // Hit
@@ -651,28 +622,31 @@ void arduinoAttack() {
       arduinoAttackMode = TARGET_MODE;
       targetIndex = 0;
       targetListInitialized = false;
+
+      // Display hit confirmation on LCD
       lcd.clear();
-      lcd.print(F("Arduino Hit at"));
+      lcd.setCursor(0, 0);
+      lcd.print(F("CPU Hit!"));
       lcd.setCursor(0, 1);
       lcd.print(F("X:"));
       lcd.print(x);
       lcd.print(F(" Y:"));
       lcd.print(y);
-      playBuzzerTone(1500, 500);
-      Serial.println(F("Arduino scored a hit!"));
     } else {
       // Miss
       setCellState(arduinoAttackGrid, x, y, CELL_MISS);
       setCellState(playerGrid, x, y, CELL_MISS);
+      playBuzzerTone(500, 200);  // Miss tone
+
+      // Display miss confirmation on LCD
       lcd.clear();
-      lcd.print(F("Arduino Miss at"));
+      lcd.setCursor(0, 0);
+      lcd.print(F("CPU Missed"));
       lcd.setCursor(0, 1);
       lcd.print(F("X:"));
       lcd.print(x);
       lcd.print(F(" Y:"));
       lcd.print(y);
-      playBuzzerTone(500, 200);
-      Serial.println(F("Arduino missed."));
     }
   } else if (arduinoAttackMode == TARGET_MODE) {
     // Target Mode: Attack adjacent cells
@@ -717,42 +691,42 @@ void arduinoAttack() {
     }
 
     if (validAttack) {
-      Serial.print(F("Arduino attacks at ("));
-      Serial.print(x);
-      Serial.print(F(", "));
-      Serial.print(y);
-      Serial.println(F(")"));
-
       if (getCellState(playerGrid, x, y) == CELL_SHIP) {
         // Hit
         setCellState(arduinoAttackGrid, x, y, CELL_HIT);
         setCellState(playerGrid, x, y, CELL_HIT);
         lastHitX = x;
         lastHitY = y;
+        arduinoAttackMode = TARGET_MODE;
         targetIndex = 0;
         targetListInitialized = false;
+
+        playBuzzerTone(1500, 500);  // Hit tone
+
+        // Display hit confirmation on LCD
         lcd.clear();
-        lcd.print(F("Arduino Hit at"));
+        lcd.setCursor(0, 0);
+        lcd.print(F("CPU Hit!"));
         lcd.setCursor(0, 1);
         lcd.print(F("X:"));
         lcd.print(x);
         lcd.print(F(" Y:"));
         lcd.print(y);
-        playBuzzerTone(1500, 500);
-        Serial.println(F("Arduino scored a hit!"));
       } else {
         // Miss
         setCellState(arduinoAttackGrid, x, y, CELL_MISS);
         setCellState(playerGrid, x, y, CELL_MISS);
+        playBuzzerTone(500, 200);  // Miss tone
+
+        // Display miss confirmation on LCD
         lcd.clear();
-        lcd.print(F("Arduino Miss at"));
+        lcd.setCursor(0, 0);
+        lcd.print(F("CPU Missed"));
         lcd.setCursor(0, 1);
         lcd.print(F("X:"));
         lcd.print(x);
         lcd.print(F(" Y:"));
         lcd.print(y);
-        playBuzzerTone(500, 200);
-        Serial.println(F("Arduino missed."));
       }
     } else {
       // No valid adjacent targets left, switch back to hunt mode
@@ -767,8 +741,10 @@ void arduinoAttack() {
   if (playerShipsRemaining == 0) {
     gameState = GAME_OVER;
     lcd.clear();
-    lcd.print(F("Arduino Wins!"));
-    Serial.println(F("Arduino wins the game!"));
+    lcd.setCursor(0, 0);
+    lcd.print(F("CPU Wins!"));
+    lcd.setCursor(0, 1);
+    lcd.print(F("Press Blue Btn"));
     playBuzzerTone(100, 1000);  // Defeat tone
     updatePlayerMatrix(); // Update player's matrix to reflect the loss
     return;
@@ -919,25 +895,13 @@ bool isShipPreviewPosition(uint8_t x, uint8_t y) {
 }
 
 int16_t getLEDIndex(int16_t x, int16_t y) {
-  // Adjust x and y to the physical location in the 12x12 matrix
-  int16_t adjustedX = x + GRID_OFFSET_X;
-  int16_t adjustedY = y + GRID_OFFSET_Y;
-  int16_t ledIndex;
-
-  if (adjustedY % 2 == 0) {
-    // Even row, left to right
-    ledIndex = adjustedY * MATRIX_SIZE + adjustedX;
-  } else {
-    // Odd row, right to left
-    ledIndex = adjustedY * MATRIX_SIZE + (MATRIX_SIZE - 1 - adjustedX);
-  }
-
-  // Ensure ledIndex is within bounds
-  if (ledIndex < 0 || ledIndex >= NUM_LEDS) {
+  // Map x and y (0-9) to index (0-99)
+  if (x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE) {
     return -1; // Invalid index
   }
 
-  return ledIndex;
+  int16_t index = y * GRID_SIZE + x;
+  return index;
 }
 
 void setCellState(uint8_t* grid, uint8_t x, uint8_t y, uint8_t state) {
