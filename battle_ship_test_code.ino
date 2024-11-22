@@ -592,9 +592,157 @@ void playerAttack() {
 }
 
 void arduinoAttack() {
-  // ... (Keep the arduinoAttack() function as it is in your original code)
-  // For brevity, I'm not including it here, but make sure to copy it from your original code
-  // Ensure that you adjust any variables or functions if necessary
+  uint8_t x, y;
+  bool validAttack = false;
+
+  if (arduinoAttackMode == HUNT_MODE) {
+    // Hunt Mode: Random attack
+    do {
+      x = random(0, GRID_SIZE);
+      y = random(0, GRID_SIZE);
+      if (getCellState(arduinoAttackGrid, x, y) == CELL_EMPTY) {
+        validAttack = true;
+      }
+    } while (!validAttack);
+
+    Serial.print(F("Arduino attacks at ("));
+    Serial.print(x);
+    Serial.print(F(", "));
+    Serial.print(y);
+    Serial.println(F(")"));
+
+    if (getCellState(playerGrid, x, y) == CELL_SHIP) {
+      // Hit
+      setCellState(arduinoAttackGrid, x, y, CELL_HIT);
+      setCellState(playerGrid, x, y, CELL_HIT);
+      lastHitX = x;
+      lastHitY = y;
+      arduinoAttackMode = TARGET_MODE;
+      targetIndex = 0;
+      targetListInitialized = false;
+      lcd.clear();
+      lcd.print(F("Arduino Hit at"));
+      lcd.setCursor(0, 1);
+      lcd.print(F("X:"));
+      lcd.print(x);
+      lcd.print(F(" Y:"));
+      lcd.print(y);
+      playBuzzerTone(1500, 500);
+      Serial.println(F("Arduino scored a hit!"));
+    } else {
+      // Miss
+      setCellState(arduinoAttackGrid, x, y, CELL_MISS);
+      lcd.clear();
+      lcd.print(F("Arduino Miss at"));
+      lcd.setCursor(0, 1);
+      lcd.print(F("X:"));
+      lcd.print(x);
+      lcd.print(F(" Y:"));
+      lcd.print(y);
+      playBuzzerTone(500, 200);
+      Serial.println(F("Arduino missed."));
+    }
+  } else if (arduinoAttackMode == TARGET_MODE) {
+    // Target Mode: Attack adjacent cells
+    if (!targetListInitialized) {
+      // Initialize target list with adjacent cells
+      targetIndex = 0;
+      uint8_t idx = 0;
+
+      if (lastHitX > 0) {
+        targetList[idx][0] = lastHitX - 1;
+        targetList[idx][1] = lastHitY;
+        idx++;
+      }
+      if (lastHitX < GRID_SIZE - 1) {
+        targetList[idx][0] = lastHitX + 1;
+        targetList[idx][1] = lastHitY;
+        idx++;
+      }
+      if (lastHitY > 0) {
+        targetList[idx][0] = lastHitX;
+        targetList[idx][1] = lastHitY - 1;
+        idx++;
+      }
+      if (lastHitY < GRID_SIZE - 1) {
+        targetList[idx][0] = lastHitX;
+        targetList[idx][1] = lastHitY + 1;
+        idx++;
+      }
+
+      targetListInitialized = true;
+    }
+
+    while (targetIndex < 4) {
+      x = targetList[targetIndex][0];
+      y = targetList[targetIndex][1];
+      targetIndex++;
+
+      if (getCellState(arduinoAttackGrid, x, y) == CELL_EMPTY) {
+        validAttack = true;
+        break;
+      }
+    }
+
+    if (validAttack) {
+      Serial.print(F("Arduino attacks at ("));
+      Serial.print(x);
+      Serial.print(F(", "));
+      Serial.print(y);
+      Serial.println(F(")"));
+
+      if (getCellState(playerGrid, x, y) == CELL_SHIP) {
+        // Hit
+        setCellState(arduinoAttackGrid, x, y, CELL_HIT);
+        setCellState(playerGrid, x, y, CELL_HIT);
+        lastHitX = x;
+        lastHitY = y;
+        targetIndex = 0;
+        targetListInitialized = false;
+        lcd.clear();
+        lcd.print(F("Arduino Hit at"));
+        lcd.setCursor(0, 1);
+        lcd.print(F("X:"));
+        lcd.print(x);
+        lcd.print(F(" Y:"));
+        lcd.print(y);
+        playBuzzerTone(1500, 500);
+        Serial.println(F("Arduino scored a hit!"));
+      } else {
+        // Miss
+        setCellState(arduinoAttackGrid, x, y, CELL_MISS);
+        lcd.clear();
+        lcd.print(F("Arduino Miss at"));
+        lcd.setCursor(0, 1);
+        lcd.print(F("X:"));
+        lcd.print(x);
+        lcd.print(F(" Y:"));
+        lcd.print(y);
+        playBuzzerTone(500, 200);
+        Serial.println(F("Arduino missed."));
+      }
+    } else {
+      // No valid adjacent targets left, switch back to hunt mode
+      arduinoAttackMode = HUNT_MODE;
+      arduinoAttack(); // Retry attack in hunt mode
+      return;
+    }
+  }
+
+  // Check if Arduino has won
+  uint8_t playerShipsRemaining = countRemainingShips(playerGrid);
+  if (playerShipsRemaining == 0) {
+    gameState = GAME_OVER;
+    lcd.clear();
+    lcd.print(F("Arduino Wins!"));
+    Serial.println(F("Arduino wins the game!"));
+    playBuzzerTone(100, 1000);  // Defeat tone
+    updateLEDMatrix(); // Update LEDs to reflect the loss
+    return;
+  }
+
+  // Switch back to player's turn
+  gameState = PLAYER_TURN;
 }
 
 void playBuzzerTone(int frequency, int duration) {
@@ -748,172 +896,3 @@ uint8_t getCellState(uint8_t* grid, uint8_t x, uint8_t y) {
   uint8_t bitOffset = (index % 4) * 2;
   return (grid[byteIndex] >> bitOffset) & 0b11;
 }
-
-void arduinoAttack() {
-  uint8_t x, y;
-  bool validAttack = false;
-
-  if (arduinoAttackMode == HUNT_MODE) {
-    // Hunt Mode: Random attack
-    do {
-      x = random(0, GRID_SIZE);
-      y = random(0, GRID_SIZE);
-      if (arduinoAttackGrid[x][y] == ATTACK_UNTRIED) {
-        validAttack = true;
-      }
-    } while (!validAttack);
-
-    Serial.print(F("Arduino attacks at ("));
-    Serial.print(x);
-    Serial.print(F(", "));
-    Serial.print(y);
-    Serial.println(F(")"));
-
-    if (playerGrid[x][y] > 0) {
-      // Hit
-      arduinoAttackGrid[x][y] = ATTACK_HIT;
-      playerGrid[x][y] = SHIP_HIT;
-      lastHitX = x;
-      lastHitY = y;
-      arduinoAttackMode = TARGET_MODE;
-      targetIndex = 0;
-      targetListInitialized = false;
-      lcd.clear();
-      lcd.print(F("Arduino Hit at"));
-      lcd.setCursor(0, 1);
-      lcd.print(F("X:"));
-      lcd.print(x);
-      lcd.print(F(" Y:"));
-      lcd.print(y);
-      playBuzzerTone(1500, 500);
-      Serial.println(F("Arduino scored a hit!"));
-    } else {
-      // Miss
-      arduinoAttackGrid[x][y] = ATTACK_MISS;
-      lcd.clear();
-      lcd.print(F("Arduino Miss at"));
-      lcd.setCursor(0, 1);
-      lcd.print(F("X:"));
-      lcd.print(x);
-      lcd.print(F(" Y:"));
-      lcd.print(y);
-      playBuzzerTone(500, 200);
-      Serial.println(F("Arduino missed."));
-    }
-  } else if (arduinoAttackMode == TARGET_MODE) {
-    // Target Mode: Attack adjacent cells
-    if (!targetListInitialized) {
-      // Initialize target list with adjacent cells
-      targetIndex = 0;
-      uint8_t idx = 0;
-
-      if (lastHitX > 0) {
-        targetList[idx][0] = lastHitX - 1;
-        targetList[idx][1] = lastHitY;
-        idx++;
-      }
-      if (lastHitX < GRID_SIZE - 1) {
-        targetList[idx][0] = lastHitX + 1;
-        targetList[idx][1] = lastHitY;
-        idx++;
-      }
-      if (lastHitY > 0) {
-        targetList[idx][0] = lastHitX;
-        targetList[idx][1] = lastHitY - 1;
-        idx++;
-      }
-      if (lastHitY < GRID_SIZE - 1) {
-        targetList[idx][0] = lastHitX;
-        targetList[idx][1] = lastHitY + 1;
-        idx++;
-      }
-
-      targetListInitialized = true;
-    }
-
-    while (targetIndex < 4) {
-      x = targetList[targetIndex][0];
-      y = targetList[targetIndex][1];
-      targetIndex++;
-
-      if (arduinoAttackGrid[x][y] == ATTACK_UNTRIED) {
-        validAttack = true;
-        break;
-      }
-    }
-
-    if (validAttack) {
-      Serial.print(F("Arduino attacks at ("));
-      Serial.print(x);
-      Serial.print(F(", "));
-      Serial.print(y);
-      Serial.println(F(")"));
-
-      if (playerGrid[x][y] > 0) {
-        // Hit
-        arduinoAttackGrid[x][y] = ATTACK_HIT;
-        playerGrid[x][y] = SHIP_HIT;
-        lastHitX = x;
-        lastHitY = y;
-        targetIndex = 0;
-        targetListInitialized = false;
-        lcd.clear();
-        lcd.print(F("Arduino Hit at"));
-        lcd.setCursor(0, 1);
-        lcd.print(F("X:"));
-        lcd.print(x);
-        lcd.print(F(" Y:"));
-        lcd.print(y);
-        playBuzzerTone(1500, 500);
-        Serial.println(F("Arduino scored a hit!"));
-      } else {
-        // Miss
-        arduinoAttackGrid[x][y] = ATTACK_MISS;
-        lcd.clear();
-        lcd.print(F("Arduino Miss at"));
-        lcd.setCursor(0, 1);
-        lcd.print(F("X:"));
-        lcd.print(x);
-        lcd.print(F(" Y:"));
-        lcd.print(y);
-        playBuzzerTone(500, 200);
-        Serial.println(F("Arduino missed."));
-      }
-    } else {
-      // No valid adjacent targets left, switch back to hunt mode
-      arduinoAttackMode = HUNT_MODE;
-      arduinoAttack(); // Retry attack in hunt mode
-      return;
-    }
-  }
-
-  // Count ships remaining
-  uint8_t playerShipsRemaining = countRemainingShips(playerGrid);
-  uint8_t arduinoShipsRemaining = countRemainingShips(arduinoGrid);
-
-  // Update Serial Monitor
-  Serial.print(F("Player Ships Remaining: "));
-  Serial.println(playerShipsRemaining);
-  Serial.print(F("Arduino Ships Remaining: "));
-  Serial.println(arduinoShipsRemaining);
-
-  // Update LCD
-  displayShipCounts(playerShipsRemaining, arduinoShipsRemaining);
-
-  // Display updated player grid
-  displayPlayerGrid();
-
-  // Check if Arduino has won
-  if (playerShipsRemaining == 0) {
-    gameState = GAME_OVER;
-    lcd.clear();
-    lcd.print(F("Arduino Wins!"));
-    Serial.println(F("Arduino wins the game!"));
-    playBuzzerTone(100, 1000);  // Defeat tone
-    return;
-  }
-
-  // Switch back to player's turn
-  gameState = PLAYER_TURN;
-}
-
