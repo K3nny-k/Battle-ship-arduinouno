@@ -21,6 +21,10 @@
 CRGB ledsPlayer[NUM_LEDS];
 CRGB ledsCPU[NUM_LEDS];
 
+// LED Controllers
+CLEDController* playerController;
+CLEDController* cpuController;
+
 // Define the size of the game grid
 #define GRID_SIZE 10
 
@@ -87,13 +91,7 @@ unsigned long lastJoystickMoveTime = 0;
 // Joystick button variables for orientation change
 byte joystickButtonState = HIGH;
 byte lastJoystickButtonState = HIGH;
-unsigned long joystickButtonPressTime = 0;
-bool joystickButtonLongPressHandled = false;
-bool joystickButtonShortPress = false;
-unsigned long lastJoystickButtonTime = 0;
-unsigned long joystickButtonDebounceDelay = 50;
-unsigned long lastJoystickButtonReleaseTime = 0;
-unsigned long lastJoystickButtonPressTime = 0; // Initialize to 0
+unsigned long lastJoystickButtonPressTime = 0; // Added this line
 unsigned long joystickDoubleClickThreshold = 500; // 500 ms
 int joystickButtonClickCount = 0;
 
@@ -138,7 +136,6 @@ int getLEDIndex(int x, int y);
 void setCellState(uint8_t* grid, uint8_t x, uint8_t y, uint8_t state);
 uint8_t getCellState(uint8_t* grid, uint8_t x, uint8_t y);
 void handleJoystickButton();
-//unsigned long lastJoystickButtonPressTime = 0; // Initialize to 0
 
 LiquidCrystal_I2C lcd(0x27, 16, 2); // Initialize LCD
 
@@ -152,8 +149,8 @@ void setup() {
   digitalWrite(CPU_SIGNAL_PIN, LOW); // Ensure it's LOW at start
 
   // Initialize LEDs for Player and CPU
-  FastLED.addLeds<WS2812B, DATA_PIN_PLAYER, GRB>(ledsPlayer, NUM_LEDS);
-  FastLED.addLeds<WS2812B, DATA_PIN_CPU, GRB>(ledsCPU, NUM_LEDS);
+  playerController = &FastLED.addLeds<WS2812B, DATA_PIN_PLAYER, GRB>(ledsPlayer, NUM_LEDS);
+  cpuController = &FastLED.addLeds<WS2812B, DATA_PIN_CPU, GRB>(ledsCPU, NUM_LEDS);
   FastLED.setBrightness(20); // Reduced brightness
   FastLED.clear(true);
   FastLED.show();
@@ -273,9 +270,7 @@ void resetGame() {
 
   // Reset joystick button states
   lastJoystickButtonState = HIGH;
-  joystickButtonPressTime = 0;
-  joystickButtonLongPressHandled = false;
-  joystickButtonShortPress = false;
+  lastJoystickButtonPressTime = 0;
   joystickButtonClickCount = 0;
 
   // Reset orientation
@@ -527,7 +522,6 @@ void handleJoystickButton() {
     joystickButtonClickCount = 0;
   }
 }
-
 
 void playerAttack() {
   bool displayUpdated = false;
@@ -844,7 +838,7 @@ void updatePlayerMatrix() {
   }
 
   // Show the player's LEDs
-  FastLED[0].show();
+  playerController->showLeds();
 }
 
 void updateCPUMatrix() {
@@ -866,7 +860,6 @@ void updateCPUMatrix() {
         }
 
         // Cell state
-        uint8_t cellState = getCellState(arduinoGrid, x, y);
         uint8_t attackState = getCellState(playerAttackGrid, x, y);
 
         if (attackState == CELL_HIT) {
@@ -884,7 +877,7 @@ void updateCPUMatrix() {
   }
 
   // Show the CPU's LEDs
-  FastLED[1].show();
+  cpuController->showLeds();
 }
 
 bool isShipPreviewPosition(uint8_t x, uint8_t y) {
